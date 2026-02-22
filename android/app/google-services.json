@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1033561091980",
+    "project_id": "klservelink",
+    "storage_bucket": "klservelink.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1033561091980:android:091ff2fcd7760fc09830a9",
+        "android_client_info": {
+          "package_name": "my.tarc.edu.fyp_flutter"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCTj6XZFhYUhud4DemL7qdRCIMAUYi71sE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
