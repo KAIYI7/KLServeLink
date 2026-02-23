@@ -135,7 +135,7 @@ class _SeekerHomeScreenState extends State<SeekerHomeScreen> {
                     const SizedBox(height: 18),
                     _PromoBanner(
                       title: "Up to 20% Off on\nCleaning Services",
-                      onTap: () {},
+                      onTap: () => widget.nav.goSearch(),
                     ),
                     const SizedBox(height: 22),
 
@@ -409,16 +409,6 @@ class _PromoBanner extends StatelessWidget {
                             ),
                           ),
                         ),
-                      ),
-                      const SizedBox(width: 12),
-                      Container(
-                        height: 52,
-                        width: 56,
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF111827),
-                          borderRadius: BorderRadius.circular(999),
-                        ),
-                        child: const Icon(Icons.north_east, color: Colors.white),
                       ),
                     ],
                   )

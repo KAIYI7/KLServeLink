@@ -1007,16 +1007,6 @@ class _HeaderBlock extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 12),
-            // Container(
-            //   height: 44,
-            //   width: 44,
-            //   decoration: BoxDecoration(
-            //     color: KLPalette.mutedBg,
-            //     shape: BoxShape.circle,
-            //     border: Border.all(color: KLPalette.border),
-            //   ),
-            //   child: const Icon(Icons.bookmark_border, color: KLPalette.text),
-            // ),
           ],
         ),
         const SizedBox(height: 12),
@@ -1058,17 +1048,30 @@ class _HeaderBlock extends StatelessWidget {
                 ),
               ),
             ],
-            const SizedBox(width: 2),
-            const Icon(Icons.star_rounded, color: Color(0xFFFBBF24)),
-            const SizedBox(width: 1),
-            Text(
-              model.rating.toStringAsFixed(1),
-              style: const TextStyle(fontWeight: FontWeight.w900),
-            ),
-            const SizedBox(width: 1),
-            Text(
-              "(${_compactReviewCount(model.reviewCount)} Reviews)",
-              style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12),
+            Expanded(
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  const Icon(Icons.star_rounded, color: Color(0xFFFBBF24)),
+                  const SizedBox(width: 4),
+                  Text(
+                    model.rating.toStringAsFixed(1),
+                    style: const TextStyle(fontWeight: FontWeight.w900),
+                  ),
+                  const SizedBox(width: 4),
+                  Flexible(
+                    child: Text(
+                      "(${_compactReviewCount(model.reviewCount)} Reviews)",
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ],
         ),
