@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'theme.dart';
 import 'seeker_nav_controller.dart';
 import 'seeker_booking_firestore.dart';
+import 'package:fyp_flutter/utils/service_thumb.dart';
 
 class LeaveReviewScreen extends StatefulWidget {
   final BookingUi booking;
@@ -46,113 +47,111 @@ class _LeaveReviewScreenState extends State<LeaveReviewScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final b = widget.booking;
+    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      stream: _bookingRef.snapshots(),
+      builder: (context, snap) {
+        final b = (snap.hasData && snap.data!.exists)
+            ? BookingUi.fromDoc(snap.data!)
+            : widget.booking;
 
-    final canSubmit = stars > 0 && ctrl.text.trim().isNotEmpty && !isSubmitting;
+        final canSubmit = stars > 0 && ctrl.text.trim().isNotEmpty && !isSubmitting;
 
-    return Scaffold(
-      backgroundColor: KLPalette.bg,
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 10, 20, 18),
-          child: Column(
-            children: [
-              _TopBar(
-                title: "Leave a Review",
-                onBack: () => Navigator.pop(context),
-              ),
-              const SizedBox(height: 16),
+        return Scaffold(
+          backgroundColor: KLPalette.bg,
+          body: SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 10, 20, 18),
+              child: Column(
+                children: [
+                  _TopBar(
+                    title: "Leave a Review",
+                    onBack: () => Navigator.pop(context),
+                  ),
+                  const SizedBox(height: 16),
 
-              _ServiceHeaderCard(b: b),
-              const SizedBox(height: 18),
+                  _ServiceHeaderCard(b: b),
+                  const SizedBox(height: 18),
 
-              const Divider(height: 1, color: KLPalette.border),
-              const SizedBox(height: 18),
+                  const Divider(height: 1, color: KLPalette.border),
+                  const SizedBox(height: 18),
 
-              const Text(
-                "How is the service ?",
-                textAlign: TextAlign.center,
-                style: TextStyle(fontWeight: FontWeight.w900, fontSize: 34, height: 1.05),
-              ),
-              const SizedBox(height: 10),
-              const Text(
-                "Please give your rating & also your review",
-                textAlign: TextAlign.center,
-                style: TextStyle(color: KLPalette.text2, fontWeight: FontWeight.w700),
-              ),
-              const SizedBox(height: 18),
+                  const Text(
+                    "How is the service ?",
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontWeight: FontWeight.w900, fontSize: 34, height: 1.05),
+                  ),
+                  const SizedBox(height: 10),
+                  const Text(
+                    "Please give your rating & also your review",
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: KLPalette.text2, fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 18),
 
-              _StarsRow(
-                value: stars,
-                onChanged: (v) => setState(() => stars = v),
-              ),
-              const SizedBox(height: 18),
+                  _StarsRow(
+                    value: stars,
+                    onChanged: (v) => setState(() => stars = v),
+                  ),
 
-              _UploadBox(
-                onTap: () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text("Browse File (TODO)")),
-                  );
-                },
-              ),
-              const SizedBox(height: 14),
+                  const SizedBox(height: 14),
 
-              Expanded(
-                child: _ReviewBox(
-                  controller: ctrl,
-                  maxLen: 200,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-
-      bottomNavigationBar: SafeArea(
-        top: false,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
-          child: Row(
-            children: [
-              Expanded(
-                child: SizedBox(
-                  height: 56,
-                  child: OutlinedButton(
-                    style: OutlinedButton.styleFrom(
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
-                      side: const BorderSide(color: KLPalette.border),
-                    ),
-                    onPressed: isSubmitting ? null : () => Navigator.pop(context),
-                    child: const Text(
-                      "Cancel",
-                      style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
+                  Expanded(
+                    child: _ReviewBox(
+                      controller: ctrl,
+                      maxLen: 200,
                     ),
                   ),
-                ),
+                ],
               ),
-              const SizedBox(width: 12),
+            ),
+          ),
 
-              Expanded(
-                child: SizedBox(
-                  height: 56,
-                  child: FilledButton(
-                    style: FilledButton.styleFrom(
-                      backgroundColor: KLPalette.primary,
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
-                    ),
-                    onPressed: !canSubmit ? null : _submit,
-                    child: const Text(
-                      "Submit",
-                      style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
+          bottomNavigationBar: SafeArea(
+            top: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: SizedBox(
+                      height: 56,
+                      child: OutlinedButton(
+                        style: OutlinedButton.styleFrom(
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
+                          side: const BorderSide(color: KLPalette.border),
+                        ),
+                        onPressed: isSubmitting ? null : () => Navigator.pop(context),
+                        child: const Text(
+                          "Cancel",
+                          style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
+                        ),
+                      ),
                     ),
                   ),
-                ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: SizedBox(
+                      height: 56,
+                      child: FilledButton(
+                        style: FilledButton.styleFrom(
+                          backgroundColor: KLPalette.primary,
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
+                        ),
+                        onPressed: !canSubmit ? null : _submit,
+                        child: const Text(
+                          "Submit",
+                          style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ),
-            ],
+            ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 
@@ -364,7 +363,13 @@ class _ServiceHeaderCard extends StatelessWidget {
             height: 86,
             width: 110,
             color: KLPalette.mutedBg,
-            child: const Icon(Icons.image, color: KLPalette.text2, size: 44),
+            child: ServiceThumb(
+              model: b,
+              placeholderBg: KLPalette.mutedBg,
+              placeholderIconColor: KLPalette.text2,
+              iconSize: 44,
+              fit: BoxFit.cover,
+            ),
           ),
         ),
         const SizedBox(width: 14),
@@ -391,10 +396,12 @@ class _ServiceHeaderCard extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 8),
+
               Text(
-                "RM ${b.unitPrice.toStringAsFixed(2)}",
+                "RM ${b.totalAmount.toStringAsFixed(2)}",
                 style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 34),
               ),
+
               const SizedBox(height: 6),
               Row(
                 children: [
