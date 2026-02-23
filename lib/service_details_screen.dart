@@ -1007,16 +1007,16 @@ class _HeaderBlock extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 12),
-            Container(
-              height: 44,
-              width: 44,
-              decoration: BoxDecoration(
-                color: KLPalette.mutedBg,
-                shape: BoxShape.circle,
-                border: Border.all(color: KLPalette.border),
-              ),
-              child: const Icon(Icons.bookmark_border, color: KLPalette.text),
-            ),
+            // Container(
+            //   height: 44,
+            //   width: 44,
+            //   decoration: BoxDecoration(
+            //     color: KLPalette.mutedBg,
+            //     shape: BoxShape.circle,
+            //     border: Border.all(color: KLPalette.border),
+            //   ),
+            //   child: const Icon(Icons.bookmark_border, color: KLPalette.text),
+            // ),
           ],
         ),
         const SizedBox(height: 12),

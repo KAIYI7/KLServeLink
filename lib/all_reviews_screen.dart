@@ -204,7 +204,7 @@ class _TopBar extends StatelessWidget {
         const Spacer(),
         Text(title, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 18)),
         const Spacer(),
-        _CircleButton(icon: Icons.ios_share_rounded, onTap: onShare),
+        //_CircleButton(icon: Icons.ios_share_rounded, onTap: onShare),
       ],
     );
   }
