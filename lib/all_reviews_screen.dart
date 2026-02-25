@@ -135,6 +135,8 @@ ReviewUiModel _reviewUiFromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
   final text = (m['text'] ?? '').toString();
   final stars = (m['stars'] is num) ? (m['stars'] as num).toDouble() : 0.0;
   final verified = (m['verifiedJob'] ?? false) == true;
+  final reviewerId = (m['seekerId'] ?? '').toString().trim();
+  final photoUrl = (m['seekerPhotoUrl'] ?? '').toString().trim();
 
   DateTime? createdAt;
   final ts = m['createdAt'];
@@ -146,6 +148,8 @@ ReviewUiModel _reviewUiFromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
     rating: stars,
     text: text,
     verifiedJob: verified,
+    reviewerId: reviewerId.isEmpty ? null : reviewerId,
+    photoUrl: photoUrl.isEmpty ? null : photoUrl,
   );
 }
 

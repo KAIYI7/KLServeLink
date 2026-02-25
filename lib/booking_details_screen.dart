@@ -60,7 +60,7 @@ class _BookingDetailsScreenState extends State<BookingDetailsScreen> {
 
   // Pricing
   double get floorPrice => widget.service.pricing.finalPackage;
-  double get perHour => widget.service.pricing.hourlyRate;
+  double get perHour => widget.service.hourlyRate;
 
   double get basePrice => widget.service.basePrice;
   double get discountPercent => widget.service.discountPct;
@@ -956,7 +956,8 @@ class _TopBar extends StatelessWidget {
         const Spacer(),
         Text(title, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 18)),
         const Spacer(),
-        _CircleButton(icon: Icons.more_horiz, onTap: onMenu),
+        const SizedBox(width: 48),
+        //_CircleButton(icon: Icons.more_horiz, onTap: onMenu),
       ],
     );
   }
@@ -1747,7 +1748,7 @@ class BookingSummaryScreen extends StatelessWidget {
 
     final pricing = service.pricing;
     final floorPrice = pricing.finalPackage;
-    final perHour = pricing.hourlyRate;
+    final perHour = service.hourlyRate;
 
     final distanceKm = (service.providerLat != null &&
         service.providerLng != null &&
@@ -1761,10 +1762,10 @@ class BookingSummaryScreen extends StatelessWidget {
 
     final q = evaluatePricing(
       floorPrice: 0,
-      packagePrice: packagePrice,
+      packagePrice: service.basePrice,          // raw package price
       includedMinutes: includedMinutes,
-      hourlyRate: perHour,
-      discountPercent: 0,
+      hourlyRate: perHour,          // extra-hour rate
+      discountPercent: service.discountPct,
       ctx: PricingContext(
         scheduledAt: scheduledAt,
         minutes: totalSelectedMinutes,
@@ -1781,6 +1782,9 @@ class BookingSummaryScreen extends StatelessWidget {
     }).toList();
 
     final pricingRulesSnapshot = service.pricingRules;
+
+    final discountedPackage =
+        service.basePrice * (1.0 - (service.discountPct.clamp(0, 100) / 100.0));
 
     return Scaffold(
       backgroundColor: KLPalette.bg,
@@ -1838,7 +1842,7 @@ class BookingSummaryScreen extends StatelessWidget {
                     if (pricing.discountPct > 0) ...[
                       _LineItem(label: "Base price", value: ServicePricingVM.rm(pricing.basePrice, decimals: 2)),
                       _LineItem(label: "Discount", value: "-${pricing.discountPct.toStringAsFixed(0)}%"),
-                      _LineItem(label: "After discount", value: ServicePricingVM.rm(floorPrice, decimals: 2)),
+                      _LineItem(label: "After discount", value: ServicePricingVM.rm(discountedPackage, decimals: 2)),
                     ] else
                       _LineItem(label: "Floor price", value: ServicePricingVM.rm(floorPrice, decimals: 2)),
                     _LineItem(
@@ -1950,6 +1954,9 @@ class BookingSummaryScreen extends StatelessWidget {
                   if (!context.mounted) return;
 
                   if (action == _BookingSuccessAction.viewReceipt) {
+                    final heroUrl = await fetchServiceHeroUrl(service.id);
+                    if (!context.mounted) return;
+
                     Navigator.push(
                       context,
                       MaterialPageRoute(
@@ -1963,6 +1970,7 @@ class BookingSummaryScreen extends StatelessWidget {
                           startTime: startTime,
                           transactionId: bookingId,
                           totalAmount: totalAmount,
+                          serviceImageUrl: heroUrl,
                         ),
                       ),
                     );
@@ -2161,4 +2169,21 @@ double _haversineKm(double lat1, double lon1, double lat2, double lon2) {
 
   final c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a));
   return r * c;
+}
+
+Future<String?> fetchServiceHeroUrl(String serviceId) async {
+  try {
+    final doc = await FirebaseFirestore.instance.collection('services').doc(serviceId).get();
+    final m = doc.data() ?? {};
+
+    final thumb = (m['thumbnailUrl'] ?? '').toString().trim();
+    final photos = (m['photoUrls'] as List?)?.cast<dynamic>() ?? const [];
+    final first = photos.isNotEmpty ? photos.first.toString().trim() : '';
+
+    if (thumb.isNotEmpty) return thumb;
+    if (first.isNotEmpty) return first;
+    return null;
+  } catch (_) {
+    return null;
+  }
 }

@@ -330,7 +330,10 @@ class BookingDetailScreen extends StatelessWidget {
                           backgroundColor: KLPalette.primary,
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
                         ),
-                        onPressed: () {
+                        onPressed: () async {
+                          final heroUrl = await fetchServiceHeroUrl(booking.serviceId);
+                          if (!context.mounted) return;
+
                           Navigator.push(
                             context,
                             MaterialPageRoute(
@@ -346,6 +349,7 @@ class BookingDetailScreen extends StatelessWidget {
                                 startTime: _formatStartTime(booking.scheduledAt),
                                 transactionId: bookingId,
                                 totalAmount: booking.totalAmount,
+                                serviceImageUrl: heroUrl,
                               ),
                             ),
                           );
@@ -1282,6 +1286,18 @@ class _BookingMapCard extends StatelessWidget {
           ),
         ),
 
+        // Legend (pin colors)
+        Positioned(
+          left: 12,
+          top: 64,
+          child: _MapLegend(
+            items: [
+              const _LegendItem(Color(0xFFEF4444), "Your address"),
+              if (providerPos != null) const _LegendItem(Color(0xFF3B82F6), "Provider"),
+            ],
+          ),
+        ),
+
         // distance pill
         if (distanceKm != null)
           Positioned(
@@ -1348,6 +1364,60 @@ class _BookingMapCard extends StatelessWidget {
       final pin = Uri.parse("https://www.google.com/maps/search/?api=1&query=$lat,$lng");
       await launchUrl(pin, mode: LaunchMode.externalApplication);
     }
+  }
+}
+
+class _LegendItem {
+  final Color color;
+  final String label;
+  const _LegendItem(this.color, this.label);
+}
+
+class _MapLegend extends StatelessWidget {
+  final List<_LegendItem> items;
+  const _MapLegend({required this.items});
+
+  @override
+  Widget build(BuildContext context) {
+    if (items.isEmpty) return const SizedBox.shrink();
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.95),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: KLPalette.border),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text("Legend", style: TextStyle(fontWeight: FontWeight.w900)),
+            const SizedBox(height: 8),
+            for (final it in items) ...[
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    height: 10,
+                    width: 10,
+                    decoration: BoxDecoration(color: it.color, shape: BoxShape.circle),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    it.label,
+                    style: const TextStyle(color: KLPalette.text2, fontWeight: FontWeight.w800),
+                  ),
+                ],
+              ),
+              if (it != items.last) const SizedBox(height: 6),
+            ],
+          ],
+        ),
+      ),
+    );
   }
 }
 
@@ -1458,6 +1528,18 @@ class _FullMapScreenState extends State<FullMapScreen> {
                 _controller = c;
                 _fitBounds();
               },
+            ),
+
+            // Legend (pin colors)
+            Positioned(
+              left: 12,
+              bottom: 84, // sits above bottom buttons
+              child: _MapLegend(
+                items: [
+                  const _LegendItem(Color(0xFFEF4444), "Your address"),
+                  if (widget.providerPos != null) const _LegendItem(Color(0xFF3B82F6), "Provider"),
+                ],
+              ),
             ),
 
             Positioned(
@@ -2278,5 +2360,22 @@ class _ProviderServicesPreview extends StatelessWidget {
         );
       },
     );
+  }
+}
+
+Future<String?> fetchServiceHeroUrl(String serviceId) async {
+  try {
+    final doc = await FirebaseFirestore.instance.collection('services').doc(serviceId).get();
+    final m = doc.data() ?? {};
+
+    final thumb = (m['thumbnailUrl'] ?? '').toString().trim();
+    final photos = (m['photoUrls'] as List?)?.cast<dynamic>() ?? const [];
+    final first = photos.isNotEmpty ? photos.first.toString().trim() : '';
+
+    if (thumb.isNotEmpty) return thumb;
+    if (first.isNotEmpty) return first;
+    return null;
+  } catch (_) {
+    return null;
   }
 }

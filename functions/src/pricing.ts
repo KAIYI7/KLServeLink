@@ -43,8 +43,11 @@ export type PricingLine = { ruleId: string; label: string; amount: number, note?
 export type PricingQuote = {
   baseFloor: number;
   hourlyRate: number;
-  hours: number;
-  hoursAmount: number;
+
+  hours: number;          // booked hours (total)
+  billableHours: number;  // extra hours beyond included hours
+
+  hoursAmount: number;    // billableHours * hourlyRate
   rulesDelta: number;
   total: number;
   lines: PricingLine[];
@@ -67,7 +70,8 @@ export function evaluatePricing(args: {
   floorPrice: number;
   hourlyRate: number;
   scheduledAt: Date;
-  hours: number;
+  hours: number;                 // booked hours (total)
+  includedHours?: number;        // package included hours
   distanceKm: number | null;
   rules: PricingRule[];
   caps?: PricingCaps;
@@ -91,7 +95,10 @@ export function evaluatePricing(args: {
   const minTotal = capNum("minTotal", 0);
   const maxTotal = capNum("maxTotal", 1e12);
 
-  const base = floorPrice + (hours * hourlyRate);
+  const includedH = Math.max(0, Number(args.includedHours ?? 0));
+  const billableHours = Math.max(0, hours - includedH);
+
+  const base = floorPrice + (billableHours * hourlyRate);
   const lines: PricingLine[] = [];
 
   // weekday: Sun=0..Sat=6 -> convert to 1..7 Mon..Sun
@@ -243,8 +250,9 @@ export function evaluatePricing(args: {
   return {
     baseFloor: floorPrice,
     hourlyRate,
-    hours,
-    hoursAmount: hours * hourlyRate,
+    hours,                 // booked hours (total)
+    billableHours,
+    hoursAmount: billableHours * hourlyRate,
     rulesDelta: delta,
     total,
     lines,

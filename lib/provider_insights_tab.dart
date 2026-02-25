@@ -113,6 +113,14 @@ class _HighOpportunityCard extends StatelessWidget {
             child: _Card(
               title: "High-Opportunity Hours",
               subtitle: "Next 7 days",
+              headerTrailing: InkWell(
+                onTap: () => _showHighOppInfo(context),
+                borderRadius: BorderRadius.circular(999),
+                child: const Padding(
+                  padding: EdgeInsets.all(6),
+                  child: Icon(Icons.info_outline, color: KLPalette.text2, size: 20),
+                ),
+              ),
               child: const Padding(
                 padding: EdgeInsets.only(top: 6),
                 child: LinearProgressIndicator(minHeight: 3),
@@ -171,6 +179,14 @@ class _HighOpportunityCard extends StatelessWidget {
                 child: _Card(
                   title: "High-Opportunity Hours",
                   subtitle: subtitle,
+                  headerTrailing: InkWell(
+                    onTap: () => _showHighOppInfo(context),
+                    borderRadius: BorderRadius.circular(999),
+                    child: const Padding(
+                      padding: EdgeInsets.all(6),
+                      child: Icon(Icons.info_outline, color: KLPalette.text2, size: 20),
+                    ),
+                  ),
                   child: Column(
                     children: [
                       _AiOppSummaryList(
@@ -193,6 +209,14 @@ class _HighOpportunityCard extends StatelessWidget {
               child: _Card(
                 title: "High-Opportunity Hours",
                 subtitle: "Next 7 days (heuristic)",
+                headerTrailing: InkWell(
+                  onTap: () => _showHighOppInfo(context),
+                  borderRadius: BorderRadius.circular(999),
+                  child: const Padding(
+                    padding: EdgeInsets.all(6),
+                    child: Icon(Icons.info_outline, color: KLPalette.text2, size: 20),
+                  ),
+                ),
                 child: Column(
                   children: [
                     _HeuristicOppBars(
@@ -218,6 +242,67 @@ class _HighOpportunityCard extends StatelessWidget {
     final hh = d.hour.toString().padLeft(2, '0');
     final mi = d.minute.toString().padLeft(2, '0');
     return "$dd/$mm $hh:$mi";
+  }
+
+  void _showHighOppInfo(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: KLPalette.bg,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
+      ),
+      builder: (_) {
+        return Padding(
+          padding: EdgeInsets.fromLTRB(
+            20,
+            16,
+            20,
+            22 + MediaQuery.of(context).viewInsets.bottom,
+          ),
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: const [
+                Text(
+                  "About High-Opportunity Hours",
+                  style: TextStyle(fontWeight: FontWeight.w900, fontSize: 18),
+                ),
+                SizedBox(height: 10),
+
+                Text(
+                  "This card highlights the best hours to be available in the next 7 days.\n\n"
+                      "What each element means:\n"
+                      "• Bar: A relative indicator (0–100%) showing how strong this hour is compared to the other shown hours. "
+                      "It is scaled to the top suggested hour.\n\n"
+                      "• Est. RM: Predicted revenue for that hour (planning estimate). "
+                      "This is an overall forecast signal from the platform model.\n\n"
+                      "• Conversion: Predicted conversion rate (bookings ÷ views). "
+                      "Shown as a percentage when available.\n\n"
+                      "• Views: Predicted number of customer views during that hour.\n\n"
+                      "Working Hours awareness:\n"
+                      "• Normal (primary color) rows are within your Working Hours.\n"
+                      "• Highlighted (amber) rows are strong opportunities outside your Working Hours — consider expanding availability to capture them.\n\n"
+                      "AI vs heuristic mode:\n"
+                      "• If AI forecast exists, the list is based on the platform opportunity_index slots.\n"
+                      "• If not, the fallback uses your past booking history to estimate strong hours.\n\n"
+                      "How this differs from the AI prediction inside a service detail screen:\n"
+                      "• This Insights tab is provider-level (overall demand/opportunity).\n"
+                      "• Service detail AI prediction is service-level and often estimates potential using "
+                      "that service’s own completed average price and expected bookings.",
+                  style: TextStyle(
+                    color: KLPalette.text2,
+                    fontWeight: FontWeight.w700,
+                    height: 1.35,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
 }
 
@@ -278,7 +363,11 @@ class _AiOppSummaryList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final slots = <({DateTime dt, double score, double? rev, double? bk, double? views, double? conv})>[];
+    const outsideColor = Color(0xFFF59E0B);
+    final insideColor = KLPalette.primary;
+
+    final slots =
+    <({DateTime dt, double score, double? rev, double? bk, double? views, double? conv, bool inWh})>[];
 
     for (final m in slotsRaw) {
       final ts = m['startAt'];
@@ -292,43 +381,50 @@ class _AiOppSummaryList extends StatelessWidget {
       final views = _d(m['expectedViews']);
       final conv = _d(m['expectedConversionRate']); // 0..1
 
-      if (dt != null) {
-        final local = dt.toLocal();
+      if (dt == null) continue;
 
-        // horizon filter
-        if (local.isBefore(start) || !local.isBefore(end)) continue;
+      final local = dt.toLocal();
 
-        // working hours filter
-        if (workingHoursRaw.isNotEmpty &&
-            !_HeuristicOppBars._isWithinWorkingHoursStrict(local, workingHoursRaw)) {
-          continue;
-        }
+      // horizon filter
+      if (local.isBefore(start) || !local.isBefore(end)) continue;
 
-        slots.add((dt: local, score: score, rev: rev, bk: bk, views: views, conv: conv));
-      }
+      final bool inWh = workingHoursRaw.isEmpty
+          ? true
+          : _HeuristicOppBars._isWithinWorkingHoursStrict(local, workingHoursRaw);
+
+      slots.add((dt: local, score: score, rev: rev, bk: bk, views: views, conv: conv, inWh: inWh));
     }
 
     if (slots.isEmpty) {
       return const Text(
-        "AI forecast exists but no suggested slots match your Working Hours in the next 7 days.",
+        "AI forecast exists but no suggested slots in the next 7 days.",
         style: TextStyle(color: KLPalette.text2, fontWeight: FontWeight.w700),
       );
     }
 
-    // Prefer ranking by expectedRevenue if present, else score
-    slots.sort((a, b) {
-      final av = (a.rev ?? -1);
-      final bv = (b.rev ?? -1);
-      if (av >= 0 && bv >= 0 && av != bv) return bv.compareTo(av);
+    double metric(double? rev, double score) => (rev ?? score);
+
+    int cmp(a, b) {
+      final av = metric(a.rev, a.score);
+      final bv = metric(b.rev, b.score);
+      if (av != bv) return bv.compareTo(av);
       return b.score.compareTo(a.score);
-    });
+    }
 
-    final top = slots.take(5).toList();
+    final inWhSlots = slots.where((s) => s.inWh).toList()..sort(cmp);
+    final outWhSlots = slots.where((s) => !s.inWh).toList()..sort(cmp);
 
-    final maxBar = top
-        .map((e) => e.rev ?? e.score)
-        .fold<double>(0, (p, v) => (v > p) ? v : p);
+    // Prefer in-WH first; fill remaining with out-of-WH suggestions
+    final top = <({DateTime dt, double score, double? rev, double? bk, double? views, double? conv, bool inWh})>[];
+    top.addAll(inWhSlots.take(5));
+    if (top.length < 5) {
+      top.addAll(outWhSlots.take(5 - top.length));
+    }
+
+    final maxBar = top.map((e) => metric(e.rev, e.score)).fold<double>(0, (p, v) => (v > p) ? v : p);
     final denom = (maxBar <= 0) ? 1.0 : maxBar;
+
+    final hasOutShown = top.any((e) => !e.inWh);
 
     return Column(
       children: [
@@ -336,11 +432,13 @@ class _AiOppSummaryList extends StatelessWidget {
           final dt = e.dt;
           final label = "${_wdShort(dt.weekday)} ${dt.hour.toString().padLeft(2, '0')}:00";
 
-          final barVal = (e.rev ?? e.score) / denom;
+          final barVal = metric(e.rev, e.score) / denom;
+          final barColor = e.inWh ? insideColor : outsideColor;
 
           final revText = (e.rev == null) ? "-" : "Est. RM ${e.rev!.toStringAsFixed(0)}";
           final convText = (e.conv == null) ? null : "${(e.conv! * 100).toStringAsFixed(1)}%";
           final viewsText = (e.views == null) ? null : "${e.views!.toStringAsFixed(0)} views";
+          final whText = e.inWh ? null : "Outside WH";
 
           return Padding(
             padding: const EdgeInsets.only(bottom: 10),
@@ -357,6 +455,7 @@ class _AiOppSummaryList extends StatelessWidget {
                       value: barVal.isNaN ? 0 : barVal.clamp(0, 1),
                       minHeight: 10,
                       backgroundColor: KLPalette.tint50,
+                      valueColor: AlwaysStoppedAnimation<Color>(barColor),
                     ),
                   ),
                 ),
@@ -364,13 +463,19 @@ class _AiOppSummaryList extends StatelessWidget {
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    Text(revText, style: const TextStyle(fontWeight: FontWeight.w900)),
-                    if (convText != null || viewsText != null)
+                    Text(
+                      revText,
+                      style: TextStyle(
+                        fontWeight: FontWeight.w900,
+                        color: e.inWh ? KLPalette.text : outsideColor,
+                      ),
+                    ),
+                    if (whText != null || convText != null || viewsText != null)
                       Text(
-                        [convText, viewsText].whereType<String>().join(" • "),
-                        style: const TextStyle(
+                        [whText, convText, viewsText].whereType<String>().join(" • "),
+                        style: TextStyle(
                           fontSize: 11,
-                          color: KLPalette.text2,
+                          color: e.inWh ? KLPalette.text2 : outsideColor,
                           fontWeight: FontWeight.w800,
                         ),
                       ),
@@ -380,15 +485,14 @@ class _AiOppSummaryList extends StatelessWidget {
             ),
           );
         }),
-        const SizedBox(height: 6),
-        const Text(
-          "Est. RM is predicted revenue for that hour (planning estimate).",
-          style: TextStyle(
-            color: KLPalette.text2,
-            fontWeight: FontWeight.w800,
-            fontSize: 12,
+
+        if (hasOutShown) ...[
+          const SizedBox(height: 6),
+          const Text(
+            "Highlighted rows are strong opportunities outside your Working Hours. Consider expanding availability to capture them.",
+            style: TextStyle(color: KLPalette.text2, fontWeight: FontWeight.w800, fontSize: 12),
           ),
-        ),
+        ],
       ],
     );
   }
@@ -704,16 +808,18 @@ class _RevenueSummaryCard extends StatelessWidget {
   }
 }
 
-/// --- shared UI ---
 class _Card extends StatelessWidget {
   final String title;
   final String subtitle;
   final Widget child;
 
+  final Widget? headerTrailing;
+
   const _Card({
     required this.title,
     required this.subtitle,
     required this.child,
+    this.headerTrailing,
   });
 
   @override
@@ -730,9 +836,25 @@ class _Card extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(title, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 18)),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    title,
+                    style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 18),
+                  ),
+                ),
+                if (headerTrailing != null) ...[
+                  const SizedBox(width: 8),
+                  headerTrailing!,
+                ],
+              ],
+            ),
             const SizedBox(height: 4),
-            Text(subtitle, style: const TextStyle(color: KLPalette.text2, fontWeight: FontWeight.w700)),
+            Text(
+              subtitle,
+              style: const TextStyle(color: KLPalette.text2, fontWeight: FontWeight.w700),
+            ),
             const SizedBox(height: 12),
             child,
           ],

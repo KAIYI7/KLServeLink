@@ -12,6 +12,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'chat_detail_screen.dart';
 
 class ProviderBookingDetailsScreen extends StatefulWidget {
   final String bookingId;
@@ -70,43 +71,62 @@ class _ProviderBookingDetailsScreenState extends State<ProviderBookingDetailsScr
 
     final ok = await showDialog<bool>(
       context: context,
-      builder: (_) => AlertDialog(
+      useRootNavigator: false,
+      builder: (dCtx) => AlertDialog(
         title: const Text("Confirm cash received?"),
-        content: const Text("Only confirm if you have received the cash payment from the seeker."),
+        content: const Text(
+          "Only confirm if you have received the cash payment from the seeker.",
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("Cancel")),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text("Confirm")),
+          TextButton(
+            onPressed: () => Navigator.of(dCtx).pop(false),
+            child: const Text("Cancel"),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dCtx).pop(true),
+            child: const Text("Confirm"),
+          ),
         ],
       ),
     );
-    if (ok != true) return;
+
+    if (ok != true || !mounted) return;
 
     setState(() => _confirmingCash = true);
 
+    late BuildContext loadingCtx;
+
     showDialog<void>(
       context: context,
+      useRootNavigator: false,
       barrierDismissible: false,
-      builder: (_) => const Center(child: CircularProgressIndicator()),
+      builder: (dCtx) {
+        loadingCtx = dCtx;
+        return const Center(child: CircularProgressIndicator());
+      },
     );
 
     try {
-      final callable = FirebaseFunctions.instance.httpsCallable("confirmCashReceived");
+      final callable =
+      FirebaseFunctions.instance.httpsCallable("confirmCashReceived");
+
       await callable.call({"bookingId": bookingId});
+
       if (!mounted) return;
-      Navigator.of(context, rootNavigator: true).pop();
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Cash marked as received.")));
-    } on FirebaseFunctionsException catch (e) {
-      if (Navigator.of(context, rootNavigator: true).canPop()) {
-        Navigator.of(context, rootNavigator: true).pop();
-      }
+
+      Navigator.of(loadingCtx).pop();
+
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.message ?? "Failed to confirm cash.")),
+        const SnackBar(content: Text("Cash marked as received.")),
       );
-    } catch (_) {
-      if (Navigator.of(context, rootNavigator: true).canPop()) {
-        Navigator.of(context, rootNavigator: true).pop();
+    } catch (e) {
+      if (Navigator.of(loadingCtx).canPop()) {
+        Navigator.of(loadingCtx).pop();
       }
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Failed to confirm cash.")));
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Failed to confirm cash.")),
+      );
     } finally {
       if (mounted) setState(() => _confirmingCash = false);
     }
@@ -138,7 +158,8 @@ class _ProviderBookingDetailsScreenState extends State<ProviderBookingDetailsScr
             final pay = _paymentMap(raw);
             final payMethod = (pay["method"] ?? raw["paymentMethod"] ?? "").toString();
             final payState = (pay["state"] ?? "").toString();
-            final needsCashConfirm = b.status == "completed" && _isCash(payMethod) && !_cashReceived(payState);
+            final needsCashConfirm =
+                b.status == ProviderBookingStatus.completed && _isCash(payMethod) && !_cashReceived(payState);
             final changed = _lastBookingIdForDistance != b.id ||
                 _lastBookingLat != b.locationLat ||
                 _lastBookingLng != b.locationLng;
@@ -235,24 +256,138 @@ class _ProviderBookingDetailsScreenState extends State<ProviderBookingDetailsScr
                   _SectionTitle("About Customer"),
                   const SizedBox(height: 10),
                   _SectionCard(
-                    child: Row(
-                      children: [
-                        const CircleAvatar(radius: 26, backgroundColor: KLPalette.tint50),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(b.seekerName, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 18)),
-                              const SizedBox(height: 6),
-                              if (b.seekerEmail != null)
-                                _meta(Icons.mail_outline, b.seekerEmail!),
-                              const SizedBox(height: 6),
-                              _meta(Icons.place_outlined, b.locationText),
-                            ],
-                          ),
-                        ),
-                      ],
+                    child: StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+                      stream: FirebaseFirestore.instance.collection('users').doc(b.seekerId).snapshots(),
+                      builder: (context, uSnap) {
+                        final data = uSnap.data?.data() ?? <String, dynamic>{};
+
+                        String pickStr(dynamic v) => (v is String) ? v.trim() : "";
+                        String pickStrAny(List<dynamic> vs) {
+                          for (final v in vs) {
+                            final s = pickStr(v);
+                            if (s.isNotEmpty) return s;
+                          }
+                          return "";
+                        }
+
+                        final name = pickStrAny([data['name'], data['displayName'], b.seekerName]);
+                        final email = pickStrAny([data['email'], data['seekerEmail'], b.seekerEmail]);
+                        final phone = pickStrAny([data['phone'], data['phoneNumber'], data['contactNumber']]);
+                        final photoUrl = pickStrAny([data['photoUrl'], data['profilePhotoUrl'], data['avatarUrl']]);
+
+                        Widget avatar() {
+                          if (photoUrl.isEmpty) {
+                            return const CircleAvatar(
+                              radius: 26,
+                              backgroundColor: KLPalette.mutedBg,
+                              child: Icon(Icons.person, color: KLPalette.text2),
+                            );
+                          }
+                          return CircleAvatar(
+                            radius: 26,
+                            backgroundColor: KLPalette.mutedBg,
+                            child: ClipOval(
+                              child: Image.network(
+                                photoUrl,
+                                fit: BoxFit.cover,
+                                width: 52,
+                                height: 52,
+                                errorBuilder: (_, __, ___) =>
+                                const Icon(Icons.person, color: KLPalette.text2),
+                              ),
+                            ),
+                          );
+                        }
+
+                        Widget miniAction({required IconData icon, required VoidCallback? onTap}) {
+                          final disabled = onTap == null;
+                          return InkWell(
+                            onTap: onTap,
+                            borderRadius: BorderRadius.circular(999),
+                            child: Opacity(
+                              opacity: disabled ? 0.35 : 1,
+                              child: Container(
+                                height: 50,
+                                width: 50,
+                                decoration: BoxDecoration(
+                                  color: KLPalette.tint50,
+                                  shape: BoxShape.circle,
+                                  border: Border.all(color: KLPalette.border),
+                                ),
+                                child: Icon(icon, color: KLPalette.primary700),
+                              ),
+                            ),
+                          );
+                        }
+
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                avatar(),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        name.isEmpty ? "Customer" : name,
+                                        style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 18),
+                                      ),
+                                      const SizedBox(height: 6),
+                                      if (email.isNotEmpty) _meta(Icons.mail_outline, email),
+                                      if (phone.isNotEmpty) ...[
+                                        const SizedBox(height: 6),
+                                        _meta(Icons.call_outlined, phone),
+                                      ],
+                                      const SizedBox(height: 6),
+                                      _meta(Icons.place_outlined, b.locationText),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+
+                            const SizedBox(height: 14),
+
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: SizedBox(
+                                    height: 50,
+                                    child: FilledButton(
+                                      style: FilledButton.styleFrom(
+                                        backgroundColor: KLPalette.primary,
+                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
+                                      ),
+                                      onPressed: () {
+                                        Navigator.push(
+                                          context,
+                                          MaterialPageRoute(
+                                            builder: (_) => ChatDetailScreen(peerUid: b.seekerId),
+                                          ),
+                                        );
+                                      },
+                                      child: const Text("Chat", style: TextStyle(fontWeight: FontWeight.w900)),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                miniAction(
+                                  icon: Icons.call_outlined,
+                                  onTap: phone.isEmpty ? null : () => _openTel(phone),
+                                ),
+                                const SizedBox(width: 10),
+                                miniAction(
+                                  icon: Icons.mail_outline_rounded,
+                                  onTap: email.isEmpty ? null : () => _openEmail(email),
+                                ),
+                              ],
+                            ),
+                          ],
+                        );
+                      },
                     ),
                   ),
 
@@ -664,6 +799,85 @@ class _ProviderBookingDetailsScreenState extends State<ProviderBookingDetailsScr
     return r * c;
   }
 
+  Future<void> _openTel(String phone) async {
+    final p = phone.replaceAll(RegExp(r"\s+"), "");
+    final url = Uri.parse("tel:$p");
+    final ok = await launchUrl(url, mode: LaunchMode.externalApplication);
+    if (!ok && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Unable to open dialer.")),
+      );
+    }
+  }
+
+  Future<void> _openEmail(String email) async {
+    final url = Uri(
+      scheme: "mailto",
+      path: email,
+      queryParameters: {"subject": "KLServeLink"},
+    );
+    final ok = await launchUrl(url, mode: LaunchMode.externalApplication);
+    if (!ok && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Unable to open email app.")),
+      );
+    }
+  }
+
+}
+
+class _LegendItem {
+  final Color color;
+  final String label;
+  const _LegendItem(this.color, this.label);
+}
+
+class _MapLegend extends StatelessWidget {
+  final List<_LegendItem> items;
+  const _MapLegend({required this.items});
+
+  @override
+  Widget build(BuildContext context) {
+    if (items.isEmpty) return const SizedBox.shrink();
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.95),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: KLPalette.border),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text("Legend", style: TextStyle(fontWeight: FontWeight.w900)),
+            const SizedBox(height: 8),
+            for (final it in items) ...[
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    height: 10,
+                    width: 10,
+                    decoration: BoxDecoration(color: it.color, shape: BoxShape.circle),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    it.label,
+                    style: const TextStyle(color: KLPalette.text2, fontWeight: FontWeight.w800),
+                  ),
+                ],
+              ),
+              if (it != items.last) const SizedBox(height: 6),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class _SectionTitle extends StatelessWidget {
@@ -785,6 +999,17 @@ class _BookingMapCard extends StatelessWidget {
                 const Icon(Icons.open_in_full, size: 18, color: KLPalette.text2), // optional hint
               ],
             ),
+          ),
+        ),
+
+        // Legend (pin colors)
+        Positioned(
+          left: 12,
+          top: 64,
+          child: _MapLegend(
+            items: const [
+              _LegendItem(Color(0xFFEF4444), "Customer address"),
+            ],
           ),
         ),
 
@@ -950,6 +1175,18 @@ class _ProviderFullMapScreenState extends State<ProviderFullMapScreen> {
                 _controller = c;
                 _fitBounds(); // if provider already ready, will show both
               },
+            ),
+
+            // Legend (pin colors)
+            Positioned(
+              left: 12,
+              bottom: 84,
+              child: _MapLegend(
+                items: [
+                  const _LegendItem(Color(0xFFEF4444), "Customer address"),
+                  if (_providerPos != null) const _LegendItem(Color(0xFF3B82F6), "Your live location"),
+                ],
+              ),
             ),
 
             // Top bar

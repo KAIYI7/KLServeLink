@@ -585,18 +585,18 @@ class _ProviderServiceFormScreenState extends State<ProviderServiceFormScreen> {
                           ),
                           const SizedBox(height: 12),
 
-                          Row(
-                            children: [
-                              Checkbox(
-                                value: featured,
-                                onChanged: (v) => setState(() => featured = v ?? false),
-                              ),
-                              const Text(
-                                "Set as Featured",
-                                style: TextStyle(fontWeight: FontWeight.w900, color: KLPalette.text2),
-                              ),
-                            ],
-                          ),
+                          // Row(
+                          //   children: [
+                          //     Checkbox(
+                          //       value: featured,
+                          //       onChanged: (v) => setState(() => featured = v ?? false),
+                          //     ),
+                          //     const Text(
+                          //       "Set as Featured",
+                          //       style: TextStyle(fontWeight: FontWeight.w900, color: KLPalette.text2),
+                          //     ),
+                          //   ],
+                          // ),
 
                           const SizedBox(height: 12),
 

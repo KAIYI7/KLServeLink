@@ -130,6 +130,7 @@ class _ChatsListFirestore extends StatelessWidget {
               builder: (context, uSnap) {
                 final u = uSnap.data?.data() ?? {};
                 final peerName = (u['name'] ?? 'User').toString();
+                final photoUrl = (u['photoUrl'] ?? '').toString().trim();
 
                 final t = ChatThreadUi(
                   threadId: docs[i].id,
@@ -142,6 +143,7 @@ class _ChatsListFirestore extends StatelessWidget {
 
                 return _ChatRowFirestore(
                   t: t,
+                  photoUrl: photoUrl,
                   onTap: () {
                     Navigator.push(
                       context,
@@ -160,8 +162,9 @@ class _ChatsListFirestore extends StatelessWidget {
 
 class _ChatRowFirestore extends StatelessWidget {
   final ChatThreadUi t;
+  final String photoUrl;
   final VoidCallback onTap;
-  const _ChatRowFirestore({required this.t, required this.onTap});
+  const _ChatRowFirestore({required this.t, required this.photoUrl, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -183,7 +186,7 @@ class _ChatRowFirestore extends StatelessWidget {
           ),
           child: Row(
             children: [
-              const CircleAvatar(radius: 26, backgroundColor: KLPalette.tint100),
+              _UserAvatar(url: photoUrl, radius: 26),
               const SizedBox(width: 14),
               Expanded(
                 child: Column(
@@ -454,6 +457,42 @@ class _CircleIcon extends StatelessWidget {
           border: Border.all(color: KLPalette.border),
         ),
         child: Icon(icon, color: filled ? Colors.white : KLPalette.text),
+      ),
+    );
+  }
+}
+
+class _UserAvatar extends StatelessWidget {
+  final String? url;
+  final double radius;
+
+  const _UserAvatar({
+    required this.url,
+    required this.radius,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final u = (url ?? '').trim();
+
+    return Container(
+      height: radius * 2,
+      width: radius * 2,
+      decoration: const BoxDecoration(
+        shape: BoxShape.circle,
+        color: KLPalette.tint100,
+      ),
+      child: ClipOval(
+        child: (u.isEmpty)
+            ? const Icon(Icons.person, color: KLPalette.text2)
+            : Image.network(
+          u,
+          fit: BoxFit.cover,
+          width: radius * 2,
+          height: radius * 2,
+          errorBuilder: (_, __, ___) =>
+          const Icon(Icons.person, color: KLPalette.text2),
+        ),
       ),
     );
   }

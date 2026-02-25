@@ -187,7 +187,7 @@ class _CardPaymentFormScreenState extends State<CardPaymentFormScreen> {
                           child: TextField(
                             controller: _expCtrl,
                             enabled: !_busy,
-                            keyboardType: TextInputType.number,
+                            keyboardType: TextInputType.datetime,
                             inputFormatters: [
                               FilteringTextInputFormatter.allow(RegExp(r"[0-9/]")),
                               LengthLimitingTextInputFormatter(5),

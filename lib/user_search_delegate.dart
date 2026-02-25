@@ -108,6 +108,7 @@ class UserSearchDelegate extends SearchDelegate<void> {
             final d = docs[i];
             final m = d.data();
             final name = (m['name'] ?? 'User').toString();
+            final photoUrl = (m['photoUrl'] ?? '').toString().trim();
 
             return Material(
               color: Colors.transparent,
@@ -129,7 +130,7 @@ class UserSearchDelegate extends SearchDelegate<void> {
                   ),
                   child: Row(
                     children: [
-                      const CircleAvatar(radius: 22, backgroundColor: KLPalette.tint100),
+                      _UserAvatar(url: photoUrl.isEmpty ? null : photoUrl, radius: 22),
                       const SizedBox(width: 12),
                       Expanded(
                         child: Text(
@@ -154,4 +155,37 @@ class UserSearchDelegate extends SearchDelegate<void> {
 
   @override
   Widget buildResults(BuildContext context) => _buildList(context);
+}
+
+class _UserAvatar extends StatelessWidget {
+  final String? url;
+  final double radius;
+
+  const _UserAvatar({required this.url, required this.radius});
+
+  @override
+  Widget build(BuildContext context) {
+    final u = (url ?? '').trim();
+
+    return Container(
+      height: radius * 2,
+      width: radius * 2,
+      decoration: const BoxDecoration(
+        shape: BoxShape.circle,
+        color: KLPalette.tint100,
+      ),
+      child: (u.isNotEmpty)
+          ? ClipOval(
+        child: Image.network(
+          u,
+          fit: BoxFit.cover,
+          width: radius * 2,
+          height: radius * 2,
+          errorBuilder: (_, __, ___) =>
+          const Icon(Icons.person, color: KLPalette.text2),
+        ),
+      )
+          : const Icon(Icons.person, color: KLPalette.text2),
+    );
+  }
 }

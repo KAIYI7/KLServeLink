@@ -225,8 +225,26 @@ export const createBookingVerified = onCall(async (req) => {
     )
   );
 
+  // Read included duration from service
+  const durH = Number(
+    svc["durationH"] ?? svc["durationHours"] ?? svc["durationHour"] ?? 0
+  );
+  const durM = Number(
+    svc["durationM"] ?? svc["durationMins"] ?? svc["durationMinutes"] ?? 0
+  );
+
+  const includedMinutes = Math.max(0, Math.round(durH * 60 + durM));
+  const includedHours = includedMinutes / 60.0;
+
   // Read hourlyRate / rules / caps
-  const hourlyRate = Number(svc["hourlyRate"] ?? 22); // fallback only if missing
+  let hourlyRate = Number(svc["hourlyRate"] ?? 0);
+
+  // fallback: derive hourly from package price / includedHours
+  if (!Number.isFinite(hourlyRate) || hourlyRate <= 0) {
+    hourlyRate =
+      includedHours > 0 ? (price / includedHours) : 22;
+  }
+
   const rulesRaw = Array.isArray(svc["pricingRules"]) ? svc["pricingRules"] : [];
   const rules = rulesRaw
     .filter((x: any) => x && typeof x === "object")
@@ -276,12 +294,14 @@ export const createBookingVerified = onCall(async (req) => {
     distanceKm = haversineKm(locLat, locLng, providerLat, providerLng);
   }
 
+
   // Evaluate pricing
   const quote = evaluatePricing({
     floorPrice,
     hourlyRate,
     scheduledAt,
-    hours,
+    hours,               // booked hours (total)
+    includedHours,       // package included hours
     distanceKm,
     rules,
     caps,
@@ -344,6 +364,9 @@ export const createBookingVerified = onCall(async (req) => {
     floorPrice: quote.baseFloor,
     hourlyRate: quote.hourlyRate,
     hours: quote.hours,
+    includedMinutes,
+    includedHours,
+    billableHours: (quote as any).billableHours ?? null,
     rulesDelta: quote.rulesDelta,
     pricingLines: quote.lines.map((l) => ({
       ruleId: l.ruleId,
@@ -352,7 +375,7 @@ export const createBookingVerified = onCall(async (req) => {
       note: l.note ?? null,
     })),
     pricingRulesSnapshot: rulesRaw,
-    pricingVersion: 1,
+    pricingVersion: 2,
     pricingVerified: true,
 
     serviceRating: Number(svc["ratingAvg"] ?? svc["rating"] ?? 0),

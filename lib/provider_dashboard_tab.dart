@@ -1599,11 +1599,7 @@ class _ProviderServiceCard extends StatelessWidget {
               SizedBox(
                 height: 110,
                 width: double.infinity,
-                child: _NetImage(
-                  url: _coverUrlFromProviderServiceUi(s),
-                  fit: BoxFit.cover,
-                  placeholderIcon: Icons.image,
-                ),
+                child: _ServiceCoverImage(s: s),
               ),
               Padding(
                 padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
@@ -1946,9 +1942,15 @@ class _HighOppPreviewList extends StatelessWidget {
         final slotsRaw = oppMap?['slots'];
         final slotsList = (slotsRaw is List) ? slotsRaw : const [];
 
-        // If AI exists, filter by horizon + working hours, then pick TOP 3 DAYS (one best slot per day)
+        // If AI exists, filter by horizon + working hours, then pick top 3 days (one best slot per day)
+        // Prefer within-Working-Hours when available; otherwise show outside-WH.
         if (slotsList.isNotEmpty) {
-          final bestByDay = <DateTime, ({DateTime dt, double score, double? rev})>{};
+          // dayKey -> best slot inside WH
+          final bestInByDay = <DateTime, ({DateTime dt, double score, double? rev, bool outsideWh})>{};
+          // dayKey -> best slot outside WH
+          final bestOutByDay = <DateTime, ({DateTime dt, double score, double? rev, bool outsideWh})>{};
+
+          double metric(double? r, double s) => (r ?? s);
 
           for (final m0 in slotsList.whereType<Map>()) {
             final m = Map<String, dynamic>.from(m0);
@@ -1962,31 +1964,50 @@ class _HighOppPreviewList extends StatelessWidget {
 
             final local = dt.toLocal();
             if (local.isBefore(day0) || !local.isBefore(dayEnd)) continue;
-            if (!allow(local)) continue;
 
             final score = (m['score'] as num?)?.toDouble() ?? 0;
             final rev = (m['expectedRevenue'] as num?)?.toDouble();
             final dayKey = DateTime(local.year, local.month, local.day);
 
-            // pick “best” slot per day (prefer revenue if available, else score)
-            double metric(double? r, double s) => (r ?? s);
+            final withinWh = !hasWhFilter ? true : allow(local);
+            final rec = (dt: local, score: score, rev: rev, outsideWh: hasWhFilter && !withinWh);
 
-            final prev = bestByDay[dayKey];
-            if (prev == null || metric(rev, score) > metric(prev.rev, prev.score)) {
-              bestByDay[dayKey] = (dt: local, score: score, rev: rev);
+            if (withinWh) {
+              final prev = bestInByDay[dayKey];
+              if (prev == null || metric(rev, score) > metric(prev.rev, prev.score)) {
+                bestInByDay[dayKey] = rec;
+              }
+            } else {
+              final prev = bestOutByDay[dayKey];
+              if (prev == null || metric(rev, score) > metric(prev.rev, prev.score)) {
+                bestOutByDay[dayKey] = rec;
+              }
             }
-
           }
 
-          if (bestByDay.isNotEmpty) {
-            final topDays = bestByDay.values.toList()
-              ..sort((a, b) {
-                final av = a.rev ?? a.score;
-                final bv = b.rev ?? b.score;
-                return bv.compareTo(av);
-              });
+          // Build final per-day choice: prefer in-WH, else outside-WH
+          final chosen = <({DateTime dt, double score, double? rev, bool outsideWh})>[];
+          final allDays = <DateTime>{
+            ...bestInByDay.keys,
+            ...bestOutByDay.keys,
+          };
 
-            final top = topDays.take(3).toList();
+          for (final d in allDays) {
+            final pick = bestInByDay[d] ?? bestOutByDay[d];
+            if (pick != null) chosen.add(pick);
+          }
+
+          if (chosen.isNotEmpty) {
+            chosen.sort((a, b) {
+              final av = a.rev ?? a.score;
+              final bv = b.rev ?? b.score;
+              return bv.compareTo(av);
+            });
+
+            final top = chosen.take(3).toList();
+
+            const outsideBg = Color(0xFFFFFBEB);
+            const outsideText = Color(0xFFB45309);
 
             return Column(
               children: top.map((e) {
@@ -1996,6 +2017,9 @@ class _HighOppPreviewList extends StatelessWidget {
                 final badgeText = (e.rev != null)
                     ? "Est. RM ${e.rev!.toStringAsFixed(0)}"
                     : "Score ${e.score.toStringAsFixed(0)}";
+
+                final bg = e.outsideWh ? outsideBg : KLPalette.tint50;
+                final textColor = e.outsideWh ? outsideText : KLPalette.primary700;
 
                 return Padding(
                   padding: const EdgeInsets.only(bottom: 10),
@@ -2007,15 +2031,15 @@ class _HighOppPreviewList extends StatelessWidget {
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                         decoration: BoxDecoration(
-                          color: KLPalette.tint50,
+                          color: bg,
                           borderRadius: BorderRadius.circular(999),
                           border: Border.all(color: KLPalette.border),
                         ),
                         child: Text(
                           badgeText,
-                          style: const TextStyle(
+                          style: TextStyle(
                             fontWeight: FontWeight.w900,
-                            color: KLPalette.primary700,
+                            color: textColor,
                           ),
                         ),
                       ),
@@ -2026,7 +2050,7 @@ class _HighOppPreviewList extends StatelessWidget {
             );
           }
 
-          // AI exists but nothing matches Working Hours (or horizon)
+          // AI exists but nothing in horizon
           if (hasWhFilter) {
             return _AvailableOppPreviewList(availability: availability, day0: day0);
           }
@@ -2647,10 +2671,10 @@ class _HighOppDrilldownList extends StatelessWidget {
       if (startMin == null || endMin == null) continue;
 
       final firstHour = ((startMin + 59) ~/ 60); // ceil
-      final lastHour = (endMin ~/ 60); // floor
+      final lastHourExclusive = (endMin ~/ 60); // floor
 
       final hrs = <int>[];
-      for (int h = firstHour; h <= lastHour; h++) {
+      for (int h = firstHour; h < lastHourExclusive; h++) {
         if (h >= 0 && h <= 23) hrs.add(h);
       }
 
@@ -2771,26 +2795,55 @@ class _AiHighOppDrilldownList extends StatelessWidget {
             : List.generate(24, (h) => h);
 
         final dayKey = DateTime(day.year, day.month, day.day);
-        final daySlots = (byDay[dayKey] ?? <_OppSlot>[]).where((s) {
-          return allowedHours.contains(s.startAtLocal.hour);
-        }).toList()
-          ..sort((a, b) => b.score.compareTo(a.score));
+        double metric(_OppSlot s) => (s.expectedRevenue ?? s.score);
+
+        final all = (byDay[dayKey] ?? <_OppSlot>[]);
+        final inWhSlots = hasWhFilter
+            ? all.where((s) => allowedHours.contains(s.startAtLocal.hour)).toList()
+            : all.toList();
+
+        final outWhSlots = hasWhFilter
+            ? all.where((s) => !allowedHours.contains(s.startAtLocal.hour)).toList()
+            : <_OppSlot>[];
+
+        inWhSlots.sort((a, b) => metric(b).compareTo(metric(a)));
+        outWhSlots.sort((a, b) => metric(b).compareTo(metric(a)));
 
         final chips = <_ChipItem>[];
         final usedHours = <int>{};
 
-        for (final s in daySlots.take(6)) {
+        // Prefer in-WH AI slots first
+        for (final s in inWhSlots.take(6)) {
           final h = s.startAtLocal.hour;
           usedHours.add(h);
+
           final rev = s.expectedRevenue;
           final label = (rev != null)
               ? "Est. RM ${rev.toStringAsFixed(0)}"
               : "Score ${s.score.toStringAsFixed(0)}";
 
-          chips.add(_ChipItem(hour: h, label: label, isAi: true, slot: s));
-
+          chips.add(_ChipItem(hour: h, label: label, isAi: true, outsideWh: false, slot: s));
         }
 
+        // Fill remaining with out-of-WH AI recommendations (open suggestion)
+        if (chips.length < 6) {
+          for (final s in outWhSlots) {
+            if (chips.length >= 6) break;
+
+            final h = s.startAtLocal.hour;
+            if (usedHours.contains(h)) continue;
+            usedHours.add(h);
+
+            final rev = s.expectedRevenue;
+            final label = (rev != null)
+                ? "Est. RM ${rev.toStringAsFixed(0)}"
+                : "Score ${s.score.toStringAsFixed(0)}";
+
+            chips.add(_ChipItem(hour: h, label: label, isAi: true, outsideWh: true, slot: s));
+          }
+        }
+
+        // Fill remaining with non-AI available hours (only if the day is open)
         if (chips.length < 6 && allowedHours.isNotEmpty) {
           for (final h in allowedHours) {
             if (chips.length >= 6) break;
@@ -2832,10 +2885,17 @@ class _AiHighOppDrilldownList extends StatelessWidget {
                     spacing: 10,
                     runSpacing: 10,
                     children: chips.map((c) {
+                      final outsideBg = const Color(0xFFFFFBEB);
+                      final outsideText = const Color(0xFFB45309);
+
+                      final bg = c.outsideWh ? outsideBg : KLPalette.tint50;
+                      final timeColor = c.outsideWh ? outsideText : KLPalette.primary700;
+                      final labelColor = c.outsideWh ? outsideText : KLPalette.text;
+
                       Widget chipBody = Container(
                         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                         decoration: BoxDecoration(
-                          color: KLPalette.tint50,
+                          color: bg,
                           borderRadius: BorderRadius.circular(999),
                           border: Border.all(color: KLPalette.border),
                         ),
@@ -2844,13 +2904,13 @@ class _AiHighOppDrilldownList extends StatelessWidget {
                           children: [
                             Text(
                               "${c.hour.toString().padLeft(2, '0')}:00",
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w900,
-                                color: KLPalette.primary700,
-                              ),
+                              style: TextStyle(fontWeight: FontWeight.w900, color: timeColor),
                             ),
                             const SizedBox(width: 8),
-                            Text(c.label, style: const TextStyle(fontWeight: FontWeight.w900)),
+                            Text(
+                              c.label,
+                              style: TextStyle(fontWeight: FontWeight.w900, color: labelColor),
+                            ),
                           ],
                         ),
                       );
@@ -2868,7 +2928,8 @@ class _AiHighOppDrilldownList extends StatelessWidget {
                 const SizedBox(height: 10),
                 const Text(
                   "Chip value shows estimated revenue for that hour (Est. RM). Tap an AI chip for details.\n"
-                      "Non-AI chips are simply your available hours.",
+                      "Non-AI chips are simply your available hours.\n"
+                      "Highlighted chips are strong opportunities outside your Working Hours — consider updating Working Hours to open then.",
                   style: TextStyle(color: KLPalette.text2, fontWeight: FontWeight.w700, fontSize: 12),
                 ),
               ],
@@ -3116,12 +3177,14 @@ class _ChipItem {
   final int hour;
   final String label;
   final bool isAi;
+  final bool outsideWh;
   final _OppSlot? slot;
 
   const _ChipItem({
     required this.hour,
     required this.label,
     required this.isAi,
+    this.outsideWh = false,
     this.slot,
   });
 }
@@ -3242,6 +3305,54 @@ class _NetImage extends StatelessWidget {
           ],
         );
       },
+    );
+  }
+}
+
+String _defaultAssetForCategory(String category) {
+  final c = category.toLowerCase().trim();
+
+  if (c.contains('clean')) return 'assets/images/defaults/cleaning.jpg';
+  if (c.contains('plumb')) return 'assets/images/defaults/plumbing.jpg';
+  if (c.contains('handyman') || c.contains('repair')) {
+    return 'assets/images/defaults/handyman.jpg';
+  }
+  if (c.contains('air') || c.contains('cond') || c.contains('aircon')) {
+    return 'assets/images/defaults/aircon.jpg';
+  }
+  if (c.contains('tutor') || c.contains('lesson')) {
+    return 'assets/images/defaults/tutoring.jpg';
+  }
+
+  return 'assets/images/defaults/handyman.jpg';
+}
+
+class _ServiceCoverImage extends StatelessWidget {
+  final ProviderServiceUi s;
+  const _ServiceCoverImage({required this.s});
+
+  @override
+  Widget build(BuildContext context) {
+    final url = _coverUrlFromProviderServiceUi(s);
+    final fallbackAsset = _defaultAssetForCategory(s.category);
+
+    if (url == null || url.trim().isEmpty) {
+      return Image.asset(fallbackAsset, fit: BoxFit.cover);
+    }
+
+    return Image.network(
+      url.trim(),
+      fit: BoxFit.cover,
+      loadingBuilder: (context, child, progress) {
+        if (progress == null) return child;
+        return Container(
+          color: KLPalette.mutedBg,
+          alignment: Alignment.center,
+          child: const Icon(Icons.image, color: KLPalette.text2, size: 42),
+        );
+      },
+      errorBuilder: (_, __, ___) =>
+          Image.asset(fallbackAsset, fit: BoxFit.cover),
     );
   }
 }

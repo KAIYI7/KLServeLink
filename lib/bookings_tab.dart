@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:fyp_flutter/utils/service_thumb.dart';
 import 'seeker_nav_controller.dart';
 import 'booking_detail_screen.dart';
 import 'theme.dart';
@@ -323,7 +324,10 @@ class _BookingCard extends StatelessWidget {
                           child: Container(
                             width: 104,
                             color: KLPalette.mutedBg,
-                            child: _BookingServiceThumb(b: b),
+                            child: ServiceThumb(
+                              model: b,
+                              fit: BoxFit.cover,
+                            ),
                           ),
                         ),
                         const SizedBox(width: 14),

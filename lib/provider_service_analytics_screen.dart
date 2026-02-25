@@ -124,6 +124,9 @@ void _showAiSlotDetailsSheet(
       ? true
       : _WorkingHours.isWithinWorkingHoursStrict(slot.startAtLocal, wh);
 
+  const outsideBg = Color(0xFFFFFBEB);
+  const outsideText = Color(0xFFB45309);
+
   final topReason = _reasonForSlot(slot, serviceAvgPrice);
 
   showModalBottomSheet(
@@ -161,10 +164,21 @@ void _showAiSlotDetailsSheet(
                       ),
                     ),
                   ),
-                  // if (filteredByWH) ...[
-                  //   const SizedBox(width: 8),
-                  //   _badgeX(isWithinWH ? "Working hours" : "Outside working hours"),
-                  // ],
+                  if (filteredByWH && !isWithinWH) ...[
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: outsideBg,
+                        borderRadius: BorderRadius.circular(999),
+                        border: Border.all(color: KLPalette.border),
+                      ),
+                      child: const Text(
+                        "Outside WH",
+                        style: TextStyle(fontWeight: FontWeight.w900, color: outsideText, fontSize: 12),
+                      ),
+                    ),
+                  ],
                 ],
               ),
 
@@ -886,30 +900,47 @@ class _AiPeakHours extends StatelessWidget {
     final day0 = DateTime(now.year, now.month, now.day);
     final dayEnd = day0.add(const Duration(days: 7));
 
-    final horizon = slots.where((s) {
-      if (s.startAtLocal.isBefore(day0) || !s.startAtLocal.isBefore(dayEnd))
+    final horizonAll = slots.where((s) {
+      if (s.startAtLocal.isBefore(day0) || !s.startAtLocal.isBefore(dayEnd)) {
         return false;
-      if (workingHoursRaw.isNotEmpty &&
-          !_WorkingHours.isWithinWorkingHoursStrict(
-            s.startAtLocal,
-            workingHoursRaw,
-          ))
-        return false;
+      }
       return true;
     }).toList();
 
-    if (horizon.isEmpty) {
+    if (horizonAll.isEmpty) {
       return const Text(
-        "AI forecast exists but no slots match your Working Hours in the next 7 days.",
+          "AI forecast exists but no slots in the next 7 days.",
         style: TextStyle(color: KLPalette.text2, fontWeight: FontWeight.w700),
       );
     }
 
     double potential(_AiSlot s) =>
         (s.expectedBookings ?? 0) * (serviceAvgPrice > 0 ? serviceAvgPrice : 1);
-    horizon.sort((a, b) => potential(b).compareTo(potential(a)));
 
-    final show = horizon.take(6).toList();
+    final hasWhFilter = workingHoursRaw.isNotEmpty;
+    final inWh = <_AiSlot>[];
+    final outWh = <_AiSlot>[];
+    for (final s in horizonAll) {
+      if (!hasWhFilter ||
+          _WorkingHours.isWithinWorkingHoursStrict(s.startAtLocal, workingHoursRaw)) {
+        inWh.add(s);
+      } else {
+        outWh.add(s);
+      }
+    }
+
+    inWh.sort((a, b) => potential(b).compareTo(potential(a)));
+    outWh.sort((a, b) => potential(b).compareTo(potential(a)));
+
+    final show = <({ _AiSlot slot, bool outsideWh })>[];
+    for (final s in inWh) {
+      if (show.length >= 6) break;
+      show.add((slot: s, outsideWh: false));
+    }
+    for (final s in outWh) {
+      if (show.length >= 6) break;
+      show.add((slot: s, outsideWh: true));
+    }
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -917,7 +948,9 @@ class _AiPeakHours extends StatelessWidget {
         Wrap(
           spacing: 10,
           runSpacing: 10,
-          children: show.map((s) {
+          children: show.map((item) {
+            final s = item.slot;
+            final outsideWh = item.outsideWh;
             final wd = s.startAtLocal.weekday;
             final hr = s.startAtLocal.hour;
             final label = "${_wdShort(wd)} ${hr.toString().padLeft(2, '0')}:00";
@@ -928,6 +961,12 @@ class _AiPeakHours extends StatelessWidget {
             final badge = (est == null)
                 ? "Score ${s.score.toStringAsFixed(0)}"
                 : "Est. RM ${est.toStringAsFixed(0)}";
+
+            const outsideBg = Color(0xFFFFFBEB);
+            const outsideText = Color(0xFFB45309);
+            final bg = outsideWh ? outsideBg : KLPalette.tint50;
+            final timeColor = outsideWh ? outsideText : KLPalette.primary700;
+            final labelColor = outsideWh ? outsideText : KLPalette.text;
 
             return InkWell(
               onTap: () => _showAiSlotDetailsSheet(
@@ -943,7 +982,7 @@ class _AiPeakHours extends StatelessWidget {
                   vertical: 10,
                 ),
                 decoration: BoxDecoration(
-                  color: KLPalette.tint50,
+                  color: bg,
                   borderRadius: BorderRadius.circular(999),
                   border: Border.all(color: KLPalette.border),
                 ),
@@ -952,15 +991,18 @@ class _AiPeakHours extends StatelessWidget {
                   children: [
                     Text(
                       label,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontWeight: FontWeight.w900,
-                        color: KLPalette.primary700,
+                        color: timeColor,
                       ),
                     ),
                     const SizedBox(width: 8),
                     Text(
                       badge,
-                      style: const TextStyle(fontWeight: FontWeight.w900),
+                      style: TextStyle(
+                        fontWeight: FontWeight.w900,
+                        color: labelColor,
+                      ),
                     ),
                   ],
                 ),
@@ -1022,24 +1064,19 @@ class _AiBusinessPredictionCard extends StatelessWidget {
     final day0 = DateTime(now.year, now.month, now.day);
     final dayEnd = day0.add(const Duration(days: 7));
 
-    final horizon = slots.where((s) {
-      if (s.startAtLocal.isBefore(day0) || !s.startAtLocal.isBefore(dayEnd))
+    final horizonAll = slots.where((s) {
+      if (s.startAtLocal.isBefore(day0) || !s.startAtLocal.isBefore(dayEnd)) {
         return false;
-      if (workingHoursRaw.isNotEmpty &&
-          !_WorkingHours.isWithinWorkingHoursStrict(
-            s.startAtLocal,
-            workingHoursRaw,
-          ))
-        return false;
+      }
       return true;
     }).toList();
 
-    if (horizon.isEmpty) {
+    if (horizonAll.isEmpty) {
       return _Card(
         title: "AI business prediction",
         subtitle: "Next 7 days",
         child: const Text(
-          "AI forecast not available (or no slots match Working Hours).",
+          "AI forecast not available (or no slots in next 7 days).",
           style: TextStyle(color: KLPalette.text2, fontWeight: FontWeight.w700),
         ),
       );
@@ -1047,10 +1084,32 @@ class _AiBusinessPredictionCard extends StatelessWidget {
 
     double potential(_AiSlot s) =>
         (s.expectedBookings ?? 0) * (serviceAvgPrice > 0 ? serviceAvgPrice : 1);
-    horizon.sort((a, b) => potential(b).compareTo(potential(a)));
-    final top = horizon.take(5).toList();
 
-    final maxV = top.map(potential).fold<double>(0, (p, v) => v > p ? v : p);
+    final hasWhFilter = workingHoursRaw.isNotEmpty;
+    final inWh = <_AiSlot>[];
+    final outWh = <_AiSlot>[];
+    for (final s in horizonAll) {
+      if (!hasWhFilter ||
+          _WorkingHours.isWithinWorkingHoursStrict(s.startAtLocal, workingHoursRaw)) {
+        inWh.add(s);
+      } else {
+        outWh.add(s);
+      }
+    }
+    inWh.sort((a, b) => potential(b).compareTo(potential(a)));
+    outWh.sort((a, b) => potential(b).compareTo(potential(a)));
+
+    final top = <({ _AiSlot slot, bool outsideWh })>[];
+    for (final s in inWh) {
+      if (top.length >= 5) break;
+      top.add((slot: s, outsideWh: false));
+    }
+    for (final s in outWh) {
+      if (top.length >= 5) break;
+      top.add((slot: s, outsideWh: true));
+    }
+
+    final maxV = top.map((e) => potential(e.slot)).fold<double>(0, (p, v) => v > p ? v : p);
     final denom = (maxV <= 0) ? 1.0 : maxV;
 
     String fmtShort(DateTime d) {
@@ -1067,47 +1126,70 @@ class _AiBusinessPredictionCard extends StatelessWidget {
           ? "Next 7 days • Est. revenue"
           : "Next 7 days • Est. revenue • Updated ${fmtShort(updatedAt!.toDate().toLocal())}",
       child: Column(
-        children: top.map((s) {
+        children: top.map((item) {
+          final s = item.slot;
+          final outsideWh = item.outsideWh;
           final label =
               "${_AiPeakHours._wdShort(s.startAtLocal.weekday)} ${s.startAtLocal.hour.toString().padLeft(2, '0')}:00";
           final est = potential(s);
           final double bar = (est / denom).clamp(0.0, 1.0).toDouble();
 
-          return InkWell(
-            onTap: () => _showAiSlotDetailsSheet(
-              context,
-              slot: s,
-              serviceAvgPrice: serviceAvgPrice,
-              workingHoursRaw: workingHoursRaw,
-            ),
-            borderRadius: BorderRadius.circular(14),
-            child: Padding(
-              padding: const EdgeInsets.only(bottom: 10),
-              child: Row(
-                children: [
-                  SizedBox(
-                    width: 110,
-                    child: Text(
-                      label,
-                      style: const TextStyle(fontWeight: FontWeight.w900),
-                    ),
-                  ),
-                  Expanded(
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(999),
-                      child: LinearProgressIndicator(
-                        value: bar.isNaN ? 0 : bar,
-                        minHeight: 10,
-                        backgroundColor: KLPalette.tint50,
+          const outsideBg = Color(0xFFFFFBEB);
+          const outsideText = Color(0xFFB45309);
+          final bg = outsideWh ? outsideBg : Colors.transparent;
+          final labelColor = outsideWh ? outsideText : KLPalette.text;
+          final amtColor = outsideWh ? outsideText : KLPalette.text;
+          final barBg = outsideWh ? outsideBg : KLPalette.tint50;
+
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 10),
+            child: InkWell(
+              onTap: () => _showAiSlotDetailsSheet(
+                context,
+                slot: s,
+                serviceAvgPrice: serviceAvgPrice,
+                workingHoursRaw: workingHoursRaw,
+              ),
+              borderRadius: BorderRadius.circular(14),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+                decoration: BoxDecoration(
+                  color: bg,
+                  borderRadius: BorderRadius.circular(14),
+                  border: outsideWh ? Border.all(color: KLPalette.border) : null,
+                ),
+                child: Row(
+                  children: [
+                    SizedBox(
+                      width: 110,
+                      child: Text(
+                        label,
+                        style: TextStyle(
+                          fontWeight: FontWeight.w900,
+                          color: labelColor,
+                        ),
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 10),
-                  Text(
-                    "RM ${est.toStringAsFixed(0)}",
-                    style: const TextStyle(fontWeight: FontWeight.w900),
-                  ),
-                ],
+                    Expanded(
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(999),
+                        child: LinearProgressIndicator(
+                          value: bar.isNaN ? 0 : bar,
+                          minHeight: 10,
+                          backgroundColor: barBg,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Text(
+                      "RM ${est.toStringAsFixed(0)}",
+                      style: TextStyle(
+                        fontWeight: FontWeight.w900,
+                        color: amtColor,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           );

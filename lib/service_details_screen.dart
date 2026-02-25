@@ -67,6 +67,13 @@ class ServiceDetailsScreen extends StatefulWidget {
 
         final pricing = ServicePricingVM.fromSeekerService(s);
 
+        final includedMinutes = pricing.durationH * 60 + pricing.durationM;
+        final includedHours = includedMinutes / 60.0;
+
+        // Derive hourly rate from package price + included duration
+        final standardHourlyRate =
+        (includedHours > 0) ? (pricing.basePrice / includedHours) : 0.0;
+
         final priceLabel = pricing.discountPct > 0 ? "After discount" : "Base price";
 
         final photos = s.photoUrls;
@@ -76,7 +83,8 @@ class ServiceDetailsScreen extends StatefulWidget {
           title: s.name,
           category: s.category,
           location: s.address,
-          heroTag: s.featured ? "Featured Service" : "Service",
+          //heroTag: s.featured ? "Featured Service" : "Service",
+          heroTag: "Service",
           photosCount: photos.length,
           photos: photos,
           heroUrl: heroUrl,
@@ -88,12 +96,12 @@ class ServiceDetailsScreen extends StatefulWidget {
           durationLabel: pricing.durationLabel,
           durationH: pricing.durationH,
           durationM: pricing.durationM,
-          hourlyRate: pricing.hourlyRate,
+          hourlyRate: standardHourlyRate,
           rating: s.rating,
           reviewCount: s.ratingCount,
           description: (s.description.trim().isNotEmpty) ? s.description : "No description provided.",
           whyRecommended: [
-            if (s.featured) "Featured",
+            //if (s.featured) "Featured",
             if (s.type == "onsite") "On-site",
             if (s.type == "remote") "Remote",
           ],
@@ -107,7 +115,7 @@ class ServiceDetailsScreen extends StatefulWidget {
           providerId: s.providerId,
           providerLat: s.lat,
           providerLng: s.lng,
-          hourlyRate: s.hourlyRate,
+          hourlyRate: standardHourlyRate,
           pricingRules: s.pricingRules,
           pricingCaps: s.pricingCaps,
           sentimentScore: s.sentimentScore,
@@ -826,6 +834,8 @@ class _ServiceDetailsScaffold extends StatelessWidget {
                               rating: reviews[i].stars.toDouble(),
                               text: reviews[i].text,
                               verifiedJob: reviews[i].verifiedJob,
+                              reviewerId: reviews[i].seekerId.isEmpty ? null : reviews[i].seekerId,
+                              photoUrl: reviews[i].seekerPhotoUrl.isEmpty ? null : reviews[i].seekerPhotoUrl,
                             ),
                           ),
                           if (i != reviews.length - 1) const SizedBox(height: 12),
@@ -849,7 +859,10 @@ class _ServiceDetailsScaffold extends StatelessWidget {
       bottomNavigationBar: SafeArea(
         top: false,
         child: _BottomCtaBar(
-          onChat: () {},
+          onChat: () {
+            nav.goChatWith(providerId);
+            Navigator.popUntil(context, (route) => route.isFirst);
+          },
           onBookNow: () {
             final service = BookedServiceUi(
               id: serviceId,
@@ -1544,7 +1557,10 @@ class ReviewCard extends StatelessWidget {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const CircleAvatar(radius: 22, backgroundColor: KLPalette.tint50),
+            _ReviewAvatar(
+              reviewerId: review.reviewerId,
+              photoUrl: review.photoUrl,
+            ),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
@@ -1570,8 +1586,8 @@ class ReviewCard extends StatelessWidget {
                           fontSize: 16,
                         ),
                       ),
-                      const SizedBox(width: 8),
-                      const Icon(Icons.more_vert, color: KLPalette.text2),
+                      // const SizedBox(width: 8),
+                      // const Icon(Icons.more_vert, color: KLPalette.text2),
                     ],
                   ),
                   const SizedBox(height: 4),
@@ -1805,6 +1821,8 @@ class ReviewUiModel {
   final double rating;
   final String text;
   final bool verifiedJob;
+  final String? reviewerId;
+  final String? photoUrl;
 
   ReviewUiModel({
     required this.name,
@@ -1812,6 +1830,8 @@ class ReviewUiModel {
     required this.rating,
     required this.text,
     this.verifiedJob = false,
+    this.reviewerId,
+    this.photoUrl,
   });
 }
 
@@ -1840,6 +1860,8 @@ class ServiceReview {
   final int stars;
   final DateTime? createdAt;
   final bool verifiedJob;
+  final String seekerId;
+  final String seekerPhotoUrl;
 
   ServiceReview({
     required this.name,
@@ -1847,16 +1869,26 @@ class ServiceReview {
     required this.stars,
     required this.createdAt,
     required this.verifiedJob,
+    required this.seekerId,
+    required this.seekerPhotoUrl,
   });
 
   static ServiceReview fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
     final m = doc.data() ?? {};
+
+    final seekerId = (m['seekerId'] ?? m['userId'] ?? m['uid'] ?? '').toString().trim();
+    final seekerPhotoUrl = (m['seekerPhotoUrl'] ?? m['photoUrl'] ?? m['avatarUrl'] ?? '')
+        .toString()
+        .trim();
+
     return ServiceReview(
       name: (m['seekerName'] ?? 'Seeker').toString(),
       text: (m['text'] ?? '').toString(),
       stars: (m['stars'] is num) ? (m['stars'] as num).toInt() : 0,
       createdAt: (m['createdAt'] is Timestamp) ? (m['createdAt'] as Timestamp).toDate() : null,
       verifiedJob: (m['verifiedJob'] ?? false) == true,
+      seekerId: seekerId,
+      seekerPhotoUrl: seekerPhotoUrl,
     );
   }
 }
@@ -1930,6 +1962,57 @@ class _NetImage extends StatelessWidget {
             ),
           ],
         );
+      },
+    );
+  }
+}
+
+class _ReviewAvatar extends StatelessWidget {
+  final String? reviewerId;
+  final String? photoUrl;
+
+  const _ReviewAvatar({this.reviewerId, this.photoUrl});
+
+  @override
+  Widget build(BuildContext context) {
+    Widget fallback() {
+      return const CircleAvatar(
+        radius: 22,
+        backgroundColor: KLPalette.tint50,
+        child: Icon(Icons.person, size: 22, color: KLPalette.text2),
+      );
+    }
+
+    Widget avatarFromUrl(String url) {
+      return CircleAvatar(
+        radius: 22,
+        backgroundColor: KLPalette.tint50,
+        child: ClipOval(
+          child: Image.network(
+            url,
+            width: 44,
+            height: 44,
+            fit: BoxFit.cover,
+            errorBuilder: (_, __, ___) =>
+            const Icon(Icons.person, size: 22, color: KLPalette.text2),
+          ),
+        ),
+      );
+    }
+
+    final direct = (photoUrl ?? '').toString().trim();
+    if (direct.isNotEmpty) return avatarFromUrl(direct);
+
+    final uid = (reviewerId ?? '').toString().trim();
+    if (uid.isEmpty) return fallback();
+
+    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+      stream: FirebaseFirestore.instance.collection('users').doc(uid).snapshots(),
+      builder: (context, snap) {
+        final data = snap.data?.data() ?? const <String, dynamic>{};
+        final url = (data['photoUrl'] ?? '').toString().trim();
+        if (url.isEmpty) return fallback();
+        return avatarFromUrl(url);
       },
     );
   }

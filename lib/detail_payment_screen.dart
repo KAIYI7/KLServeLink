@@ -17,10 +17,12 @@ class DetailPaymentScreen extends StatelessWidget {
   final String locationText;
   final String paymentMethod;
 
-  /// Optional, for simulated payment flows.
+  final String? serviceImageUrl;
+
+  /// For simulated payment flows.
   final String? paymentStatus;
 
-  /// Optional raw payment map from booking doc (e.g. payment.method/state/meta).
+  /// Raw payment map from booking doc
   final Map<String, dynamic>? paymentData;
   final DateTime date;
   final String startTime;
@@ -34,6 +36,7 @@ class DetailPaymentScreen extends StatelessWidget {
     required this.rating,
     required this.locationText,
     required this.paymentMethod,
+    this.serviceImageUrl,
     this.paymentStatus,
     this.paymentData,
     required this.date,
@@ -130,8 +133,15 @@ class DetailPaymentScreen extends StatelessWidget {
                                       child: Container(
                                         height: 88,
                                         width: 88,
-                                        color: KLPalette.mutedBg,
-                                        child: const Icon(Icons.image, color: KLPalette.text2, size: 42),
+                                        decoration: BoxDecoration(
+                                          color: KLPalette.mutedBg,
+                                          border: Border.all(color: KLPalette.border),
+                                        ),
+                                        child: _NetImage(
+                                          url: serviceImageUrl,
+                                          fit: BoxFit.cover,
+                                          placeholderIcon: Icons.image,
+                                        ),
                                       ),
                                     ),
                                     const SizedBox(width: 14),
@@ -775,4 +785,60 @@ class DetailPaymentScreen extends StatelessWidget {
     }
   }
 
+}
+
+class _NetImage extends StatelessWidget {
+  final String? url;
+  final BoxFit fit;
+  final IconData placeholderIcon;
+  final bool big;
+
+  const _NetImage({
+    this.url,
+    this.fit = BoxFit.cover,
+    this.placeholderIcon = Icons.image,
+    this.big = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final u = (url ?? '').trim();
+
+    Widget placeholder() => Container(
+      color: KLPalette.mutedBg,
+      alignment: Alignment.center,
+      child: Icon(
+        placeholderIcon,
+        size: big ? 68 : 34,
+        color: KLPalette.text2,
+      ),
+    );
+
+    if (u.isEmpty) return placeholder();
+
+    return Image.network(
+      u,
+      fit: fit,
+      filterQuality: FilterQuality.low,
+      errorBuilder: (_, __, ___) => placeholder(),
+      loadingBuilder: (context, child, progress) {
+        if (progress == null) return child;
+        return Stack(
+          fit: StackFit.expand,
+          children: [
+            placeholder(),
+            Align(
+              alignment: Alignment.bottomCenter,
+              child: LinearProgressIndicator(
+                minHeight: 3,
+                value: (progress.expectedTotalBytes == null)
+                    ? null
+                    : progress.cumulativeBytesLoaded / (progress.expectedTotalBytes ?? 1),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
 }

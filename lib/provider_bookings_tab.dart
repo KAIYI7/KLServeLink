@@ -396,13 +396,7 @@ class _BookingCard extends StatelessWidget {
                 child: Stack(
                   children: [
                     Positioned.fill(
-                      child: ServiceThumb(
-                        model: b,
-                        placeholderBg: KLPalette.mutedBg,
-                        placeholderIconColor: KLPalette.text2,
-                        iconSize: 44,
-                        fit: BoxFit.cover,
-                      ),
+                      child: _BookingCoverImage(b: b),
                     ),
 
                     Positioned(
@@ -529,5 +523,37 @@ class _BookingCard extends StatelessWidget {
   static String _fmtDateTime(DateTime dt) {
     final two = (int n) => n.toString().padLeft(2, '0');
     return "${two(dt.day)}/${two(dt.month)}/${dt.year}  ${two(dt.hour)}:${two(dt.minute)}";
+  }
+}
+
+String _defaultAssetForServiceName(String serviceName) {
+  final c = serviceName.toLowerCase().trim();
+
+  if (c.contains('clean')) return 'assets/images/defaults/cleaning.jpg';
+  if (c.contains('plumb')) return 'assets/images/defaults/plumbing.jpg';
+  if (c.contains('handyman') || c.contains('repair')) {
+    return 'assets/images/defaults/handyman.jpg';
+  }
+  if (c.contains('air') || c.contains('cond') || c.contains('aircon')) {
+    return 'assets/images/defaults/aircon.jpg';
+  }
+  if (c.contains('tutor') || c.contains('lesson')) {
+    return 'assets/images/defaults/tutoring.jpg';
+  }
+
+  return 'assets/images/defaults/handyman.jpg';
+}
+
+class _BookingCoverImage extends StatelessWidget {
+  final ProviderBooking b;
+
+  const _BookingCoverImage({required this.b});
+
+  @override
+  Widget build(BuildContext context) {
+    return ServiceThumb(
+      model: b,
+      fit: BoxFit.cover,
+    );
   }
 }

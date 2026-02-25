@@ -1400,6 +1400,15 @@ class _MapPreviewFirestore extends StatelessWidget {
             ),
 
             Positioned(
+              left: 5,
+              bottom: 5,
+              child: _MapLegend(
+                showMePin: myLocation != null,
+                showGpsDot: true,
+              ),
+            ),
+
+            Positioned(
               right: 14,
               top: 14,
               child: Row(
@@ -1619,6 +1628,15 @@ class _FullSearchMapScreenState extends State<FullSearchMapScreen> {
 
             Positioned(
               left: 12,
+              bottom: 84,
+              child: _MapLegend(
+                showMePin: widget.myLocation != null,
+                showGpsDot: true,
+              ),
+            ),
+
+            Positioned(
+              left: 12,
               right: 12,
               bottom: 12,
               child: Row(
@@ -1698,6 +1716,72 @@ class _DarkPillButton extends StatelessWidget {
                 fontSize: 16,
               ),
             ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MapLegend extends StatelessWidget {
+  final bool showMain;
+  final bool showMePin;
+  final bool showGpsDot;
+  final bool showServices;
+
+  const _MapLegend({
+    this.showMain = true,
+    this.showMePin = true,
+    this.showGpsDot = true,
+    this.showServices = true,
+  });
+
+  Widget _pin(Color c) => Icon(Icons.location_on, size: 18, color: c);
+
+  Widget _dot(Color c) => Container(
+    height: 10,
+    width: 10,
+    decoration: BoxDecoration(
+      color: c,
+      shape: BoxShape.circle,
+      border: Border.all(color: Colors.white, width: 2),
+    ),
+  );
+
+  Widget _row(Widget icon, String label) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox(width: 18, child: Center(child: icon)),
+          const SizedBox(width: 8),
+          Text(label, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12)),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(10, 10, 10, 10),
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.95),
+          border: Border.all(color: KLPalette.border),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text("Legend", style: TextStyle(fontWeight: FontWeight.w900, fontSize: 13)),
+            const SizedBox(height: 6),
+            if (showMain) _row(_pin(Colors.green), "Main Address (green pin)"),
+            if (showMePin) _row(_pin(Colors.blue), "You (blue pin)"),
+            if (showGpsDot) _row(_dot(Colors.blue), "GPS location (blue dot)"),
+            if (showServices) _row(_pin(Colors.red), "Services (red pin)"),
           ],
         ),
       ),

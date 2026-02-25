@@ -27,6 +27,11 @@ class ServiceThumb extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final serviceName = _tryGetServiceName(model);
+    final fallbackAsset = serviceName != null
+        ? _defaultAssetForServiceName(serviceName)
+        : null;
+
     // If model already has an image URL -> use it
     final direct = _tryGetImageUrl(model);
     if (direct != null) {
@@ -37,10 +42,11 @@ class ServiceThumb extends StatelessWidget {
         bg: placeholderBg,
         iconColor: placeholderIconColor,
         iconSize: iconSize,
+        fallbackAsset: fallbackAsset,
       );
     }
 
-    // 2) Else read service doc by serviceId/listingId
+    // Else read service doc by serviceId/listingId
     final serviceId = _tryGetServiceId(model);
     if (serviceId == null) {
       return _NetImage(
@@ -50,6 +56,7 @@ class ServiceThumb extends StatelessWidget {
         bg: placeholderBg,
         iconColor: placeholderIconColor,
         iconSize: iconSize,
+        fallbackAsset: fallbackAsset,
       );
     }
 
@@ -62,6 +69,7 @@ class ServiceThumb extends StatelessWidget {
         bg: placeholderBg,
         iconColor: placeholderIconColor,
         iconSize: iconSize,
+        fallbackAsset: fallbackAsset,
       );
     }
 
@@ -88,6 +96,7 @@ class ServiceThumb extends StatelessWidget {
           bg: placeholderBg,
           iconColor: placeholderIconColor,
           iconSize: iconSize,
+          fallbackAsset: fallbackAsset,
         );
       },
     );
@@ -109,7 +118,7 @@ class ServiceThumb extends StatelessWidget {
 
     String? pick(dynamic v) => (v is String && v.trim().isNotEmpty) ? v.trim() : null;
 
-    // Common names (add more if your model has them)
+    // Common names
     try { final v = pick(d.thumbnailUrl); if (v != null) return v; } catch (_) {}
     try { final v = pick(d.serviceThumbnailUrl); if (v != null) return v; } catch (_) {}
     try { final v = pick(d.coverUrl); if (v != null) return v; } catch (_) {}
@@ -158,6 +167,7 @@ class _NetImage extends StatelessWidget {
   final Color? bg;
   final Color? iconColor;
   final double iconSize;
+  final String? fallbackAsset;
 
   const _NetImage({
     this.url,
@@ -166,17 +176,28 @@ class _NetImage extends StatelessWidget {
     this.bg,
     this.iconColor,
     this.iconSize = 44,
+    this.fallbackAsset,
   });
 
   @override
   Widget build(BuildContext context) {
     final u = (url ?? '').trim();
 
-    Widget placeholder() => Container(
-      color: bg ?? const Color(0xFFF3F4F6),
-      alignment: Alignment.center,
-      child: Icon(placeholderIcon, size: iconSize, color: iconColor ?? const Color(0xFF9CA3AF)),
-    );
+    Widget placeholder() {
+      if (fallbackAsset != null) {
+        return Image.asset(fallbackAsset!, fit: fit);
+      }
+
+      return Container(
+        color: bg ?? const Color(0xFFF3F4F6),
+        alignment: Alignment.center,
+        child: Icon(
+          placeholderIcon,
+          size: iconSize,
+          color: iconColor ?? const Color(0xFF9CA3AF),
+        ),
+      );
+    }
 
     if (u.isEmpty) return placeholder();
 
@@ -205,4 +226,35 @@ class _NetImage extends StatelessWidget {
       },
     );
   }
+}
+
+String? _defaultAssetForServiceName(String serviceName) {
+  final c = serviceName.toLowerCase().trim();
+
+  if (c.contains('clean')) return 'assets/images/defaults/cleaning.jpg';
+  if (c.contains('plumb')) return 'assets/images/defaults/plumbing.jpg';
+  if (c.contains('handyman') || c.contains('repair')) {
+    return 'assets/images/defaults/handyman.jpg';
+  }
+  if (c.contains('air') || c.contains('cond') || c.contains('aircon')) {
+    return 'assets/images/defaults/aircon.jpg';
+  }
+  if (c.contains('tutor') || c.contains('lesson')) {
+    return 'assets/images/defaults/tutoring.jpg';
+  }
+
+  return null;
+}
+
+String? _tryGetServiceName(Object obj) {
+  final d = obj as dynamic;
+
+  String? pick(dynamic v) =>
+      (v is String && v.trim().isNotEmpty) ? v.trim() : null;
+
+  try { final v = pick(d.serviceName); if (v != null) return v; } catch (_) {}
+  try { final v = pick(d.name); if (v != null) return v; } catch (_) {}
+  try { final v = pick(d.title); if (v != null) return v; } catch (_) {}
+
+  return null;
 }

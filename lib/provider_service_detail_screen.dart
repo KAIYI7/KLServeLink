@@ -302,10 +302,13 @@ class _ProviderServiceDetailScreenState extends State<ProviderServiceDetailScree
   }
 
   void _showProviderPricingPreview(BuildContext context, ProviderServiceUi service) {
-    final basePrice = service.price.toDouble();
+    final basePrice = service.price.toDouble(); // raw package price
     final discountPercent = service.discount.toDouble().clamp(0.0, 100.0);
+
     final includedMinutes = (service.durationHours * 60) + service.durationMins;
-    final hourlyRate = service.hourlyRate;
+    final includedHours = includedMinutes / 60.0;
+
+    final hourlyRate = (includedHours > 0) ? (basePrice / includedHours) : 0.0;
 
     showModalBottomSheet(
       context: context,
@@ -341,16 +344,12 @@ class _ProviderServiceDetailScreenState extends State<ProviderServiceDetailScree
             final when = (r["when"] as Map?)?.cast<String, dynamic>() ?? const {};
             final minD = (when["minDistanceKm"] as num?)?.toDouble();
             final maxD = (when["maxDistanceKm"] as num?)?.toDouble();
-
-            // Prefer minDistanceKm if present; otherwise use maxDistanceKm as a meaningful threshold.
             final candidate = minD ?? maxD;
             if (candidate == null) continue;
-
             best = (best == null) ? candidate : (candidate < best! ? candidate : best);
           }
           return best;
         }
-
 
         DateTime previewScheduledAt() {
           final now = DateTime.now();
@@ -367,7 +366,7 @@ class _ProviderServiceDetailScreenState extends State<ProviderServiceDetailScree
         }
 
         String fmtPreviewTime(DateTime dt) {
-          final wd = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"][dt.weekday - 1];
+          final wd = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][dt.weekday - 1];
           final hh = dt.hour.toString().padLeft(2, '0');
           final mm = dt.minute.toString().padLeft(2, '0');
           return "$wd $hh:$mm";
@@ -375,7 +374,6 @@ class _ProviderServiceDetailScreenState extends State<ProviderServiceDetailScree
 
         bool ruleApplies(Map<String, dynamic> r, DateTime scheduledAt, double distanceKm) {
           final id = (r["id"] ?? "rule").toString();
-
           final q = evaluatePricing(
             floorPrice: 0,
             packagePrice: basePrice,
@@ -418,8 +416,7 @@ class _ProviderServiceDetailScreenState extends State<ProviderServiceDetailScree
             );
 
             final selectedMinutes = hours * 60;
-            final extraMinutes = (selectedMinutes - includedMinutes).clamp(0, 1 << 30);
-            final extraHours = extraMinutes / 60.0;
+            final extraMinutes = (selectedMinutes - includedMinutes).clamp(0, 1 << 30).toInt();
 
             String fmtHM(int mins) {
               final h = mins ~/ 60;
@@ -465,7 +462,6 @@ class _ProviderServiceDetailScreenState extends State<ProviderServiceDetailScree
                         style: const TextStyle(color: KLPalette.text2, fontWeight: FontWeight.w700),
                       ),
                     ),
-
                     const SizedBox(height: 14),
 
                     // controls
@@ -557,7 +553,11 @@ class _ProviderServiceDetailScreenState extends State<ProviderServiceDetailScree
                     )),
 
                     const Divider(color: KLPalette.border),
-                    _LineItem(label: "Estimated total", value: "RM ${quote.total.toStringAsFixed(2)}", bold: true),
+                    _LineItem(
+                      label: "Estimated total",
+                      value: "RM ${quote.total.toStringAsFixed(2)}",
+                      bold: true,
+                    ),
 
                     const SizedBox(height: 16),
 
@@ -999,6 +999,51 @@ class ProviderServiceInsightsMini extends StatelessWidget {
     return "$dd/$mm $hh:$mi";
   }
 
+  static bool _isWithinWorkingHoursStrict(DateTime dt, Map<String, dynamic> workingHours) {
+    if (workingHours.isEmpty) return true;
+    String weekdayKey(DateTime x) {
+      switch (x.weekday) {
+        case DateTime.monday: return 'mon';
+        case DateTime.tuesday: return 'tue';
+        case DateTime.wednesday: return 'wed';
+        case DateTime.thursday: return 'thu';
+        case DateTime.friday: return 'fri';
+        case DateTime.saturday: return 'sat';
+        case DateTime.sunday:
+        default: return 'sun';
+      }
+    }
+
+    TimeOfDay? parseHHmm(dynamic v) {
+      final s = v?.toString();
+      if (s == null || !s.contains(':')) return null;
+      final parts = s.split(':');
+      final h = int.tryParse(parts[0]);
+      final m = int.tryParse(parts[1]);
+      if (h == null || m == null) return null;
+      return TimeOfDay(hour: h, minute: m);
+    }
+
+    int toMin(TimeOfDay t) => t.hour * 60 + t.minute;
+
+    final key = weekdayKey(dt);
+    final day = workingHours[key];
+    if (day is! Map) return false;
+    final m = day.cast<String, dynamic>();
+
+    final enabled = (m['enabled'] == true);
+    if (!enabled) return false;
+
+    final start = parseHHmm(m['start']) ?? const TimeOfDay(hour: 9, minute: 0);
+    final end = parseHHmm(m['end']) ?? const TimeOfDay(hour: 18, minute: 0);
+
+    final dtMin = dt.hour * 60 + dt.minute;
+    final startMin = toMin(start);
+    final endMin = toMin(end);
+
+    return dtMin >= startMin && dtMin <= endMin;
+  }
+
   static void _showAiSlotDetails(
       BuildContext context, {
         required _AiSlot s,
@@ -1208,6 +1253,11 @@ class ProviderServiceInsightsMini extends StatelessWidget {
                       builder: (context, userSnap) {
                         final userData = userSnap.data?.data() ?? const <String, dynamic>{};
 
+                        final workingHoursRaw = (userData['workingHours'] is Map)
+                            ? (userData['workingHours'] as Map).cast<String, dynamic>()
+                            : <String, dynamic>{};
+                        final hasWhFilter = workingHoursRaw.isNotEmpty;
+
                         final opp = userData['opportunity_index'];
                         final oppMap = (opp is Map) ? Map<String, dynamic>.from(opp as Map) : null;
 
@@ -1248,9 +1298,27 @@ class ProviderServiceInsightsMini extends StatelessWidget {
                         double slotPotential(_AiSlot s) =>
                             (s.expectedBookings ?? 0) * (serviceAvgPrice > 0 ? serviceAvgPrice : 1);
 
-                        horizon.sort((a, b) => slotPotential(b).compareTo(slotPotential(a)));
+                        final inWh = <_AiSlot>[];
+                        final outWh = <_AiSlot>[];
+                        for (final s in horizon) {
+                          if (!hasWhFilter || _isWithinWorkingHoursStrict(s.startAtLocal, workingHoursRaw)) {
+                            inWh.add(s);
+                          } else {
+                            outWh.add(s);
+                          }
+                        }
+                        inWh.sort((a, b) => slotPotential(b).compareTo(slotPotential(a)));
+                        outWh.sort((a, b) => slotPotential(b).compareTo(slotPotential(a)));
 
-                        final top = horizon.take(3).toList();
+                        final top = <({ _AiSlot slot, bool outsideWh })>[];
+                        for (final s in inWh) {
+                          if (top.length >= 3) break;
+                          top.add((slot: s, outsideWh: false));
+                        }
+                        for (final s in outWh) {
+                          if (top.length >= 3) break;
+                          top.add((slot: s, outsideWh: true));
+                        }
 
                         return Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1265,7 +1333,9 @@ class ProviderServiceInsightsMini extends StatelessWidget {
                             Wrap(
                               spacing: 10,
                               runSpacing: 10,
-                              children: top.map((s) {
+                              children: top.map((item) {
+                                final s = item.slot;
+                                final outsideWh = item.outsideWh;
                                 final label = "${_wdShort(s.startAtLocal.weekday)} ${_fmtHour(s.startAtLocal.hour)}";
                                 final avgPrice = (serviceAvgPrice > 0) ? serviceAvgPrice : 0.0;
                                 final est = (avgPrice > 0) ? (s.expectedBookings ?? 0) * avgPrice : null;
@@ -1273,6 +1343,12 @@ class ProviderServiceInsightsMini extends StatelessWidget {
                                 final badge = (est == null)
                                     ? "Score ${s.score.toStringAsFixed(0)}"
                                     : "Est. RM ${est.toStringAsFixed(0)}";
+
+                                const outsideBg = Color(0xFFFFFBEB);
+                                const outsideText = Color(0xFFB45309);
+                                final bg = outsideWh ? outsideBg : KLPalette.tint50;
+                                final timeColor = outsideWh ? outsideText : KLPalette.primary700;
+                                final badgeColor = outsideWh ? outsideText : KLPalette.text;
 
                                 return InkWell(
                                   borderRadius: BorderRadius.circular(999),
@@ -1284,7 +1360,7 @@ class ProviderServiceInsightsMini extends StatelessWidget {
                                   child: Container(
                                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                                     decoration: BoxDecoration(
-                                      color: KLPalette.tint50,
+                                      color: bg,
                                       borderRadius: BorderRadius.circular(999),
                                       border: Border.all(color: KLPalette.border),
                                     ),
@@ -1292,12 +1368,12 @@ class ProviderServiceInsightsMini extends StatelessWidget {
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
                                         Text(label,
-                                            style: const TextStyle(
+                                            style: TextStyle(
                                               fontWeight: FontWeight.w900,
-                                              color: KLPalette.primary700,
+                                              color: timeColor,
                                             )),
                                         const SizedBox(width: 8),
-                                        Text(badge, style: const TextStyle(fontWeight: FontWeight.w900)),
+                                        Text(badge, style: TextStyle(fontWeight: FontWeight.w900, color: badgeColor,)),
                                       ],
                                     ),
                                   ),
