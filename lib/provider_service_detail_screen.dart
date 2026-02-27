@@ -677,7 +677,7 @@ class _RuleCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Icon(
-              appliesNow ? Icons.check_circle_rounded : Icons.info_outline,
+              appliesNow ? Icons.check_circle_rounded : Icons.remove_circle_outline_rounded,
               color: appliesNow ? KLPalette.primary : KLPalette.text2,
               size: 20,
             ),
@@ -1141,6 +1141,25 @@ class ProviderServiceInsightsMini extends StatelessWidget {
 
     final userRef = FirebaseFirestore.instance.collection('users').doc(providerId);
 
+    bool isCollected(Map<String, dynamic> b) {
+      final p = (b['payment'] is Map)
+          ? Map<String, dynamic>.from(b['payment'] as Map)
+          : <String, dynamic>{};
+
+      final method =
+      (p['method'] ?? b['paymentMethod'] ?? '').toString().toLowerCase();
+      final state = (p['state'] ?? '').toString().toLowerCase();
+
+      if (state == 'refunded') return false;
+      if (method == 'cash') return state == 'cash_received';
+      if (method == 'card') return state == 'captured';
+      return false;
+    }
+
+    bool isEarned(Map<String, dynamic> b) {
+      return (b['status'] ?? '').toString().toLowerCase() == 'completed';
+    }
+
     return ClipRRect(
       borderRadius: BorderRadius.circular(26),
       child: Container(
@@ -1174,6 +1193,8 @@ class ProviderServiceInsightsMini extends StatelessWidget {
 
                 int pending = 0, accepted = 0, completed = 0, declined = 0;
                 double revenueCompleted = 0;
+                double collectedRevenue = 0;
+                double earnedRevenue = 0;
 
                 int last7 = 0;
                 for (final d in snap.data!.docs) {
@@ -1184,8 +1205,13 @@ class ProviderServiceInsightsMini extends StatelessWidget {
                   else if (s == 'accepted') accepted++;
                   else if (s == 'completed') {
                     completed++;
-                    final amt = m['totalAmount'];
-                    if (amt is num) revenueCompleted += amt.toDouble();
+                    // final amt = m['totalAmount'];
+                    // if (amt is num) revenueCompleted += amt.toDouble();
+                    final amtRaw = m['totalAmount'];
+                    final amt = (amtRaw is num) ? amtRaw.toDouble() : 0.0;
+
+                    if (isCollected(m)) collectedRevenue += amt;
+                    if (isEarned(m)) earnedRevenue += amt;
                   } else if (s == 'declined') declined++;
 
                   final ts = m['scheduledAt'];
@@ -1198,7 +1224,7 @@ class ProviderServiceInsightsMini extends StatelessWidget {
                 final last28 = snap.data!.docs.length;
 
                 final serviceAvgPrice = (completed > 0)
-                    ? (revenueCompleted / completed)
+                    ? (earnedRevenue / completed)
                     : 0.0;
 
                 return Column(
@@ -1218,16 +1244,16 @@ class ProviderServiceInsightsMini extends StatelessWidget {
                       children: [
                         Expanded(
                           child: _MiniStat(
-                            label: "Declined",
-                            value: declined.toString(),
+                            label: "Collected",
+                            value: "RM ${collectedRevenue.toStringAsFixed(0)}",
                             bg: KLPalette.tint50,
                           ),
                         ),
                         const SizedBox(width: 10),
                         Expanded(
                           child: _MiniStat(
-                            label: "Revenue (Completed)",
-                            value: "RM ${revenueCompleted.toStringAsFixed(0)}",
+                            label: "Earned",
+                            value: "RM ${earnedRevenue.toStringAsFixed(0)}",
                             bg: KLPalette.tint50,
                           ),
                         ),

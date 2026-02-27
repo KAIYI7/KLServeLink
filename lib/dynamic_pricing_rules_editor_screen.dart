@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:fyp_flutter/pricing/dynamic_pricing_models.dart';
+import 'package:fyp_flutter/pricing_rules_validator.dart';
 import 'package:fyp_flutter/utils/app_snack.dart';
 import 'theme.dart';
 
@@ -200,6 +201,52 @@ Example:
 If blank, defaults to “very high” (effectively no ceiling).
 """;
 
+  static const String _helpRulesOverview = """
+Rules adjust the booking price when their conditions are met.
+
+━━━━━━━━━━━━━━━━━━
+HOW RULES WORK
+━━━━━━━━━━━━━━━━━━
+
+• Rule Types
+  - Fixed (RM): Adds or subtracts a fixed amount.
+  - Percent (%): Adds or subtracts a percentage of the calculated base price.
+
+• Conditions
+  Rules are evaluated at booking time based on:
+  - Day / time
+  - Distance
+  - Duration (hours)
+  - Lead time
+  - Date range
+
+• Multiple Rules
+  - More than one rule can apply to a booking.
+  - If two rules belong to the same "exclusive group",
+    only ONE rule from that group will be applied
+    (to prevent double discounts or conflicts).
+  - Rules from different groups can stack.
+
+━━━━━━━━━━━━━━━━━━
+HOW VALIDATION WORKS
+━━━━━━━━━━━━━━━━━━
+
+• Save Validation
+  The editor checks rules on Save to prevent contradictory
+  or ambiguous setups — especially overlapping rules that
+  could surprise users (e.g., a surcharge and a discount
+  targeting the same time window).
+
+• Exclusive Grouping
+  When rules are intended to be alternatives, the system
+  automatically assigns exclusive groups so that only one
+  can apply at a time.
+
+• Caps
+  - Optional caps limit how strong each rule can be.
+  - Advanced caps can also clamp the final total price.
+""";
+
   Future<void> _showHelpSheet({required String title, required String body}) async {
     await showModalBottomSheet<void>(
       context: context,
@@ -208,50 +255,65 @@ If blank, defaults to “very high” (effectively no ceiling).
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
       ),
-      builder: (_) {
-        return SafeArea(
-          top: false,
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 14, 20, 24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Center(
-                  child: Container(
-                    height: 4,
-                    width: 46,
-                    decoration: BoxDecoration(
-                      color: KLPalette.border,
-                      borderRadius: BorderRadius.circular(999),
-                    ),
+        builder: (_) {
+          return SafeArea(
+            top: false,
+            child: DraggableScrollableSheet(
+              expand: false,
+              initialChildSize: 0.6,
+              minChildSize: 0.4,
+              maxChildSize: 0.9,
+              builder: (_, controller) {
+                return SingleChildScrollView(
+                  controller: controller,
+                  padding: const EdgeInsets.fromLTRB(20, 14, 20, 24),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Center(
+                        child: Container(
+                          height: 4,
+                          width: 46,
+                          decoration: BoxDecoration(
+                            color: KLPalette.border,
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              title,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w900,
+                                fontSize: 18,
+                              ),
+                            ),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.close_rounded),
+                            onPressed: () => Navigator.pop(context),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      Text(
+                        body.trim(),
+                        style: const TextStyle(
+                          color: KLPalette.text2,
+                          fontWeight: FontWeight.w700,
+                          height: 1.35,
+                        ),
+                      ),
+                    ],
                   ),
-                ),
-                const SizedBox(height: 14),
-                Text(title, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 18)),
-                const SizedBox(height: 10),
-                Text(
-                  body.trim(),
-                  style: const TextStyle(
-                    color: KLPalette.text2,
-                    fontWeight: FontWeight.w700,
-                    height: 1.35,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                SizedBox(
-                  height: 48,
-                  width: double.infinity,
-                  child: FilledButton.tonal(
-                    onPressed: () => Navigator.pop(context),
-                    child: const Text("Got it"),
-                  ),
-                ),
-              ],
+                );
+              },
             ),
-          ),
-        );
-      },
+          );
+        }
     );
   }
 
@@ -577,7 +639,7 @@ If blank, defaults to “very high” (effectively no ceiling).
     });
   }
 
-  void _saveAndPop() {
+  Future<void> _saveAndPop() async {
     final anyAdvanced = _usingAdvancedCapsUI;
 
     final invalid = <String>[];
@@ -679,10 +741,37 @@ If blank, defaults to “very high” (effectively no ceiling).
 
     final capsFinal = outCaps.isEmpty ? null : outCaps;
 
+    final withGroups = PricingRulesValidator.autoAssignExclusiveGroups(rules);
+    final errs = PricingRulesValidator.validate(withGroups);
+
+    if (errs.isNotEmpty) {
+      await showDialog<void>(
+        context: context,
+        useRootNavigator: false,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text("Invalid pricing rules"),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: errs.map((e) => Text("• $e")).toList(),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text("OK"),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
     Navigator.pop(
       context,
       PricingEditorResult(
-        rules: rules,
+        rules: withGroups,
         caps: capsFinal,
       ),
     );
@@ -908,6 +997,11 @@ If blank, defaults to “very high” (effectively no ceiling).
                     Row(
                       children: [
                         const Text("Rules", style: TextStyle(fontWeight: FontWeight.w900, fontSize: 18)),
+                        const SizedBox(width: 2),
+                        _helpIcon(
+                          title: "Pricing rules & validation",
+                          body: _helpRulesOverview,
+                        ),
                         const Spacer(),
                         FilledButton.tonal(
                           onPressed: () => _addOrEdit(),
@@ -950,7 +1044,7 @@ If blank, defaults to “very high” (effectively no ceiling).
                                 child: Row(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    const Icon(Icons.bolt_rounded, color: KLPalette.primary),
+                                    const Icon(Icons.local_offer_rounded, color: KLPalette.primary),
                                     const SizedBox(width: 10),
                                     Expanded(
                                       child: Column(

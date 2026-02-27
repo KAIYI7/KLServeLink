@@ -66,6 +66,34 @@ function parseIsoDate(v: any): Date | null {
   return new Date(y, m - 1, d);
 }
 
+function applyExclusiveGroups(applicable: PricingRule[]): PricingRule[] {
+  const nonGrouped: PricingRule[] = [];
+  const grouped = new Map<string, PricingRule[]>();
+
+  for (const r of applicable) {
+    const g = String(r.exclusiveGroup ?? "").trim();
+    if (!g) {
+      nonGrouped.push(r);
+      continue;
+    }
+    const arr = grouped.get(g) ?? [];
+    arr.push(r);
+    grouped.set(g, arr);
+  }
+
+  const picked: PricingRule[] = [];
+  for (const [_g, arr] of grouped.entries()) {
+    arr.sort((a, b) =>
+      (Number(b.priority ?? 0) - Number(a.priority ?? 0)) ||
+      (Math.abs(Number(b.value ?? 0)) - Math.abs(Number(a.value ?? 0))) ||
+      String(a.id).localeCompare(String(b.id))
+    );
+    picked.push(arr[0]);
+  }
+
+  return [...nonGrouped, ...picked];
+}
+
 export function evaluatePricing(args: {
   floorPrice: number;
   hourlyRate: number;
@@ -186,10 +214,19 @@ export function evaluatePricing(args: {
     return Math.min(0, Math.max(-maxDiscountFixed, v));
   };
 
-  // priority high -> low
-  const sorted = [...rules].sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
+  const appliesWhen = (when: any) => matches(when);
+  // Filter by applicability
+  const applicable = rules.filter(r => appliesWhen(r.when ?? {}));
 
-  const usedExclusive = new Set<string>();
+  // Enforce exclusive groups
+  const selected = applyExclusiveGroups(applicable);
+
+  // Stable ordering for pricing + line items
+  const sorted = [...selected].sort((a, b) =>
+    (Number(b.priority ?? 0) - Number(a.priority ?? 0)) ||
+    String(a.id).localeCompare(String(b.id))
+  );
+
   let delta = 0;
 
   for (const r of sorted) {
@@ -197,12 +234,6 @@ export function evaluatePricing(args: {
     const label = String(r.label ?? id);
     const type = r.type;
     const value = Number(r.value ?? 0);
-    const when = r.when ?? {};
-
-    if (!matches(when)) continue;
-
-    const group = String(r.exclusiveGroup ?? "").trim();
-    if (group && usedExclusive.has(group)) continue;
 
     let amt = 0;
     let note: string | undefined;
@@ -228,10 +259,14 @@ export function evaluatePricing(args: {
     }
 
     if (Math.abs(amt) > 0.0001) {
-        delta += amt;
-        lines.push({ ruleId: id, label, amount: amt, note });
-        if (group) usedExclusive.add(group);
-      }
+      delta += amt;
+      lines.push({
+        ruleId: id,
+        label,
+        amount: amt,
+        note,
+      });
+    }
   }
 
   const rawTotal = base + delta;

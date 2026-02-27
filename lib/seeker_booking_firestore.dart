@@ -1,6 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
-enum SeekerBookingTab { upcoming, completed }
+enum SeekerBookingTab { upcoming, completed, cancelled }
 
 class SeekerBookingFirestore {
   final _db = FirebaseFirestore.instance;
@@ -18,8 +18,10 @@ class SeekerBookingFirestore {
     // completed: completed
     if (tab == SeekerBookingTab.completed) {
       q = q.where('status', isEqualTo: 'completed');
+    } else if (tab == SeekerBookingTab.cancelled) {
+      q = q.where('status', whereIn: ['cancelled', 'declined']);
     } else {
-      q = q.where('status', whereIn: ['pending', 'accepted']);
+      q = q.where('status', whereIn: ['pending', 'accepted', 'confirmed']);
     }
 
     q = q.orderBy('scheduledAt', descending: false);
@@ -80,10 +82,11 @@ class BookingUi {
   static BookingUi fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
     final m = doc.data() ?? {};
 
-    final statusStr = (m['status'] ?? 'pending').toString();
+    final statusStr = (m['status'] ?? 'pending').toString().toLowerCase();
     final bookingStatus = switch (statusStr) {
       'completed' => BookingStatus.completed,
       'cancelled' => BookingStatus.cancelled,
+      'declined'  => BookingStatus.cancelled,
       _ => BookingStatus.upcoming,
     };
 

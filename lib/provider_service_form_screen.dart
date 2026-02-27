@@ -1,4 +1,5 @@
 import 'package:fyp_flutter/pricing/dynamic_pricing_models.dart';
+import 'package:fyp_flutter/pricing_rules_validator.dart';
 import 'dart:typed_data';
 import 'package:image_picker/image_picker.dart';
 import 'categories.dart';
@@ -175,6 +176,17 @@ class _ProviderServiceFormScreenState extends State<ProviderServiceFormScreen> {
     final packageAfterDiscount = price * (1.0 - discount / 100.0);
     final hourlyRate = packageAfterDiscount / durationHr;
 
+    // Validate dynamic pricing rules
+    final withGroups = PricingRulesValidator.autoAssignExclusiveGroups(_pricingRules);
+    final errs = PricingRulesValidator.validate(withGroups);
+
+    if (errs.isNotEmpty) {
+      if (!mounted) return;
+      await _showInvalidPricingRulesDialog(errs);
+      setState(() => saving = false);
+      return;
+    }
+
     try {
       final ok = await _ensureLatLngFromAddress(addr);
       if (!ok) {
@@ -211,7 +223,7 @@ class _ProviderServiceFormScreenState extends State<ProviderServiceFormScreen> {
         thumbnailUrl: thumb,
         price: price,
         discount: discount,
-        pricingRules: _pricingRules,
+        pricingRules: withGroups,
         pricingCaps: _pricingCaps,
         hourlyRate: hourlyRate,
         durationHours: h,
@@ -908,6 +920,29 @@ class _ProviderServiceFormScreenState extends State<ProviderServiceFormScreen> {
                 child: const Icon(Icons.close, color: Colors.white, size: 18),
               ),
             ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showInvalidPricingRulesDialog(List<String> errs) async {
+    await showDialog<void>(
+      context: context,
+      useRootNavigator: false,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text("Invalid pricing rules"),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: errs.map((e) => Text("• $e")).toList(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text("OK"),
           ),
         ],
       ),

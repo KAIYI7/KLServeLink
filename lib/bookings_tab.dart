@@ -38,6 +38,82 @@ class _BookingsTabState extends State<BookingsTab> {
     });
   }
 
+  void _showSortInfo(BuildContext context) {
+    String title;
+    List<String> lines;
+
+    switch (filter) {
+      case BookingsFilter.upcoming:
+        title = "Sorting (Upcoming)";
+        lines = [
+          "Sorted by scheduled time (soonest first).",
+        ];
+        break;
+      case BookingsFilter.completed:
+        title = "Sorting (Completed)";
+        lines = [
+          "Sorted by scheduled time (newest first).",
+        ];
+        break;
+      case BookingsFilter.all:
+      default:
+        title = "Sorting (All)";
+        lines = [
+          "Grouped by status:",
+          "• Upcoming first (soonest first)",
+          "• Completed next (newest first)",
+          "• Cancelled/Declined last (newest first)",
+        ];
+        break;
+    }
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: KLPalette.bg,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
+      ),
+      builder: (_) {
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 46,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: KLPalette.border,
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  const Icon(Icons.sort, color: KLPalette.text2),
+                  const SizedBox(width: 10),
+                  Text(title, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 18)),
+                ],
+              ),
+              const SizedBox(height: 12),
+              for (final t in lines) ...[
+                Text(
+                  t,
+                  style: const TextStyle(color: KLPalette.text2, fontWeight: FontWeight.w700, height: 1.35),
+                ),
+                const SizedBox(height: 6),
+              ],
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   List<BookingUi> _applySearch(List<BookingUi> items) {
     final q = _q.trim().toLowerCase();
     if (q.isEmpty) return items;
@@ -86,9 +162,18 @@ class _BookingsTabState extends State<BookingsTab> {
                   const Spacer(),
                   const Text("Bookings", style: TextStyle(fontWeight: FontWeight.w900, fontSize: 22)),
                   const Spacer(),
-                  _CircleButton(
-                    icon: showSearch ? Icons.close_rounded : Icons.search,
-                    onTap: _toggleSearch,
+                  Row(
+                    children: [
+                      _CircleButton(
+                        icon: showSearch ? Icons.close_rounded : Icons.search,
+                        onTap: _toggleSearch,
+                      ),
+                      const SizedBox(width: 10),
+                      _CircleButton(
+                        icon: Icons.info_outline_rounded,
+                        onTap: () => _showSortInfo(context),
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -97,6 +182,19 @@ class _BookingsTabState extends State<BookingsTab> {
               _Segmented(
                 value: filter,
                 onChanged: (v) => setState(() => filter = v),
+              ),
+
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  filter == BookingsFilter.upcoming
+                      ? "Sorted: soonest booking first"
+                      : filter == BookingsFilter.completed
+                      ? "Sorted: newest booking first"
+                      : "Sorted: Upcoming → Completed → Cancelled",
+                  style: const TextStyle(color: KLPalette.text2, fontWeight: FontWeight.w700),
+                ),
               ),
 
               if (showSearch) ...[
@@ -158,7 +256,14 @@ class _BookingsTabState extends State<BookingsTab> {
                         if (!snap.hasData) return const Center(child: CircularProgressIndicator());
 
                         final raw = snap.data ?? const [];
-                        final items = _applySearch(raw);
+                        final items = _applySearch(raw).toList();
+
+                        // Sort depending on filter
+                        if (filter == BookingsFilter.upcoming) {
+                          items.sort((a, b) => a.scheduledAt.compareTo(b.scheduledAt)); // soonest first
+                        } else if (filter == BookingsFilter.completed) {
+                          items.sort((a, b) => b.scheduledAt.compareTo(a.scheduledAt)); // newest first
+                        }
 
                         if (_q.trim().isNotEmpty && items.isEmpty) {
                           return const Center(
@@ -283,7 +388,28 @@ class _BookingCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isUpcoming = b.status == BookingStatus.upcoming;
+    final s = b.status;
+    final isUpcoming = s == BookingStatus.upcoming;
+    final isCompleted = s == BookingStatus.completed;
+    final isCancelled = s == BookingStatus.cancelled;
+
+    final pillBg = isUpcoming
+        ? const Color(0xFFFDECC8)
+        : isCompleted
+        ? const Color(0xFFDFF7EA)
+        : const Color(0xFFFEE2E2);
+
+    final pillFg = isUpcoming
+        ? const Color(0xFF9A6B1B)
+        : isCompleted
+        ? const Color(0xFF1B7B45)
+        : const Color(0xFFB91C1C);
+
+    final pillText = isUpcoming
+        ? "Upcoming"
+        : isCompleted
+        ? "Completed"
+        : "Cancelled";
 
     return Material(
       color: Colors.transparent,
@@ -402,43 +528,14 @@ class _BookingCard extends StatelessWidget {
                       borderRadius: BorderRadius.circular(999),
                     ),
                     child: Text(
-                      isUpcoming ? "Upcoming" : "Completed",
+                      pillText,
                       style: TextStyle(
                         fontWeight: FontWeight.w900,
-                        color: isUpcoming ? const Color(0xFF9A6B1B) : const Color(0xFF1B7B45),
+                        color: pillFg,
                       ),
                     ),
                   ),
                 ),
-
-                // Action icon: pinned bottom-right (interactive, does NOT open details)
-                // Positioned(
-                //   right: 14,
-                //   bottom: 14,
-                //   child: Material(
-                //     color: Colors.transparent,
-                //     child: InkWell(
-                //       borderRadius: BorderRadius.circular(999),
-                //       onTap: () {
-                //         // TODO: message worker OR favorite action
-                //       },
-                //       child: Container(
-                //         height: 56,
-                //         width: 56,
-                //         decoration: BoxDecoration(
-                //           color: isUpcoming ? KLPalette.tint200 : KLPalette.primary,
-                //           shape: BoxShape.circle,
-                //           border: Border.all(color: KLPalette.border),
-                //         ),
-                //         alignment: Alignment.center,
-                //         child: Icon(
-                //           isUpcoming ? Icons.chat_bubble_outline : Icons.star_border_rounded,
-                //           color: isUpcoming ? KLPalette.text : Colors.white,
-                //         ),
-                //       ),
-                //     ),
-                //   ),
-                // ),
               ],
             ),
           ),
@@ -584,55 +681,90 @@ class _AllBookingsList extends StatelessWidget {
         return StreamBuilder<List<BookingUi>>(
           stream: fs.streamMyBookings(seekerId: seekerId, tab: SeekerBookingTab.completed),
           builder: (context, coSnap) {
-            if (!upSnap.hasData || !coSnap.hasData) {
-              return const Center(child: CircularProgressIndicator());
-            }
+            return StreamBuilder<List<BookingUi>>(
+              stream: fs.streamMyBookings(seekerId: seekerId, tab: SeekerBookingTab.cancelled),
+              builder: (context, caSnap) {
+                if (!upSnap.hasData || !coSnap.hasData || !caSnap.hasData) {
+                  return const Center(child: CircularProgressIndicator());
+                }
 
-            final upcoming = upSnap.data ?? const [];
-            final completed = coSnap.data ?? const [];
+                final upcoming = upSnap.data ?? const [];
+                final completed = coSnap.data ?? const [];
+                final cancelled = caSnap.data ?? const [];
 
-            // merge + dedupe by id
-            final map = <String, BookingUi>{};
-            for (final b in upcoming) map[b.id] = b;
-            for (final b in completed) map[b.id] = b;
+                // merge + dedupe by id
+                final map = <String, BookingUi>{};
+                for (final b in upcoming) map[b.id] = b;
+                for (final b in completed) map[b.id] = b;
+                for (final b in cancelled) map[b.id] = b;
 
-            final items = map.values.toList()
-              ..sort((a, b) => b.scheduledAt.compareTo(a.scheduledAt));
+                final allItems = map.values.toList();
 
-            final q = query.trim().toLowerCase();
-            final filtered = (q.isEmpty)
-                ? items
-                : items.where((b) {
-              final id = b.id.toLowerCase();
-              final title = b.title.toLowerCase();
-              final area = b.locationArea.toLowerCase();
-              return id.contains(q) || title.contains(q) || area.contains(q);
-            }).toList();
+                int groupRank(BookingUi b) {
+                  switch (b.status) {
+                    case BookingStatus.upcoming:
+                      return 0;
+                    case BookingStatus.completed:
+                      return 1;
+                    case BookingStatus.cancelled:
+                      return 2;
+                  }
+                }
 
-            if (q.isNotEmpty && filtered.isEmpty) {
-              return const Center(
-                child: Text(
-                  "No results found.",
-                  style: TextStyle(color: KLPalette.text2, fontWeight: FontWeight.w700),
-                ),
-              );
-            }
+                int compare(BookingUi a, BookingUi b) {
+                  final ga = groupRank(a);
+                  final gb = groupRank(b);
+                  if (ga != gb) return ga.compareTo(gb);
 
-            if (items.isEmpty) {
-              return _EmptyState(
-                title: "You don’t have a booking yet",
-                subtitle: "Make a new booking by clicking the button below.",
-                icon: Icons.markunread_mailbox_rounded,
-                buttonText: "New Booking",
-                onTap: () => nav.goSearch(),
-              );
-            }
+                  // Within same group:
+                  if (ga == 0) {
+                    // upcoming: soonest first
+                    return a.scheduledAt.compareTo(b.scheduledAt);
+                  } else {
+                    // completed/cancelled: newest first
+                    return b.scheduledAt.compareTo(a.scheduledAt);
+                  }
+                }
 
-            return ListView.separated(
-              padding: const EdgeInsets.only(bottom: 120),
-              itemCount: filtered.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 14),
-              itemBuilder: (_, i) => _BookingCard(b: filtered[i], nav: nav),
+                final q = query.trim().toLowerCase();
+                final filtered = (q.isEmpty)
+                    ? allItems
+                    : allItems.where((b) {
+                  final id = b.id.toLowerCase();
+                  final title = b.title.toLowerCase();
+                  final area = b.locationArea.toLowerCase();
+                  return id.contains(q) || title.contains(q) || area.contains(q);
+                }).toList();
+
+                // Apply the grouped sorting after filtering
+                filtered.sort(compare);
+
+                if (q.isNotEmpty && filtered.isEmpty) {
+                  return const Center(
+                    child: Text(
+                      "No results found.",
+                      style: TextStyle(color: KLPalette.text2, fontWeight: FontWeight.w700),
+                    ),
+                  );
+                }
+
+                if (allItems.isEmpty) {
+                  return _EmptyState(
+                    title: "You don’t have a booking yet",
+                    subtitle: "Make a new booking by clicking the button below.",
+                    icon: Icons.markunread_mailbox_rounded,
+                    buttonText: "New Booking",
+                    onTap: () => nav.goSearch(),
+                  );
+                }
+
+                return ListView.separated(
+                  padding: const EdgeInsets.only(bottom: 120),
+                  itemCount: filtered.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 14),
+                  itemBuilder: (_, i) => _BookingCard(b: filtered[i], nav: nav),
+                );
+              },
             );
           },
         );

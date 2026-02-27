@@ -1,14 +1,18 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
-enum ProviderBookingStatus { all, pending, accepted, declined, completed, cancelled }
+enum ProviderBookingStatus { all, pending, accepted, confirmed, declined, completed, cancelled }
 
 ProviderBookingStatus bookingStatusFromString(String s) {
   switch (s) {
     case 'accepted':
       return ProviderBookingStatus.accepted;
+    case 'confirmed':
+      return ProviderBookingStatus.confirmed;
     case 'completed':
       return ProviderBookingStatus.completed;
     case 'declined':
+      return ProviderBookingStatus.declined;
+    case 'rejected':
       return ProviderBookingStatus.declined;
     case 'cancelled':
       return ProviderBookingStatus.cancelled;
@@ -23,6 +27,8 @@ String bookingStatusToString(ProviderBookingStatus s) {
   switch (s) {
     case ProviderBookingStatus.accepted:
       return 'accepted';
+    case ProviderBookingStatus.confirmed:
+      return 'confirmed';
     case ProviderBookingStatus.completed:
       return 'completed';
     case ProviderBookingStatus.declined:

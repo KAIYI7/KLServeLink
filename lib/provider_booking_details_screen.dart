@@ -34,6 +34,61 @@ class _ProviderBookingDetailsScreenState extends State<ProviderBookingDetailsScr
     return <String, dynamic>{};
   }
 
+  String _paymentMethodFromBooking(Map<String, dynamic> b) {
+    final p = _paymentMap(b);
+    return (p['method'] ?? b['paymentMethod'] ?? '').toString().toLowerCase();
+  }
+
+  String _paymentStateFromBooking(Map<String, dynamic> b) {
+    final p = _paymentMap(b);
+    return (p['state'] ?? '').toString().toLowerCase();
+  }
+
+  bool _cardPaidOrCaptured(Map<String, dynamic> b) {
+    final method = _paymentMethodFromBooking(b);
+    final state = _paymentStateFromBooking(b);
+    return method == 'card' && (state == 'authorized' || state == 'captured');
+  }
+
+  Future<void> _providerDeclineOrCancel({
+    required Map<String, dynamic> bookingData,
+    required String bookingId,
+  }) async {
+    try {
+      if (_cardPaidOrCaptured(bookingData)) {
+        // Paid already → refund via callable
+        final callable =
+        FirebaseFunctions.instance.httpsCallable('cancelBookingWithRefund');
+        await callable.call({
+          'bookingId': bookingId,
+          'reason': 'provider_declined',
+        });
+
+        if (mounted) {
+          AppSnack.show(context, "Declined + refund processed.", type: AppSnackType.success);
+        }
+      } else {
+        // Not paid yet → decline normally
+        final uid = FirebaseAuth.instance.currentUser?.uid;
+        if (uid == null) return;
+
+        await api.updateStatus(
+          bookingId: bookingId,
+          newStatus: ProviderBookingStatus.declined,
+          actorUid: uid,
+        );
+
+        if (mounted) {
+          AppSnack.show(context, "Booking declined.", type: AppSnackType.success);
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        AppSnack.show(context, "Decline failed: $e", type: AppSnackType.error);
+      }
+    }
+  }
+
   bool _isCash(String method) {
     final m = method.toLowerCase();
     return m.contains("cash");
@@ -506,7 +561,10 @@ class _ProviderBookingDetailsScreenState extends State<ProviderBookingDetailsScr
                           child: SizedBox(
                             height: 54,
                             child: OutlinedButton(
-                              onPressed: () => _update(context, b.id, ProviderBookingStatus.declined),
+                              onPressed: () => _providerDeclineOrCancel(
+                                bookingData: raw,
+                                bookingId: b.id,
+                              ),
                               style: OutlinedButton.styleFrom(
                                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
                               ),
@@ -516,7 +574,7 @@ class _ProviderBookingDetailsScreenState extends State<ProviderBookingDetailsScr
                         ),
                       ],
                     ),
-                  ] else if (b.status == ProviderBookingStatus.accepted) ...[
+                  ] else if (b.status == ProviderBookingStatus.accepted || b.status == ProviderBookingStatus.confirmed) ...[
                     SizedBox(
                       width: double.infinity,
                       height: 54,
@@ -529,7 +587,7 @@ class _ProviderBookingDetailsScreenState extends State<ProviderBookingDetailsScr
                       ),
                     ),
                   ] else ...[
-                    // completed/declined/cancelled read-only (with optional cash confirmation)
+                    // completed/declined/cancelled read-only (with cash confirmation)
                     if (needsCashConfirm) ...[
                       Container(
                         width: double.infinity,
@@ -611,6 +669,8 @@ class _ProviderBookingDetailsScreenState extends State<ProviderBookingDetailsScr
         return "Pending";
       case ProviderBookingStatus.accepted:
         return "Accepted";
+      case ProviderBookingStatus.confirmed:
+        return "Confirmed";
       case ProviderBookingStatus.completed:
         return "Completed";
       case ProviderBookingStatus.declined:
@@ -629,6 +689,8 @@ class _ProviderBookingDetailsScreenState extends State<ProviderBookingDetailsScr
       case ProviderBookingStatus.pending:
         return const Color(0xFFB91C1C);
       case ProviderBookingStatus.accepted:
+        return KLPalette.primary700;
+      case ProviderBookingStatus.confirmed:
         return KLPalette.primary700;
       case ProviderBookingStatus.declined:
         return KLPalette.text2;

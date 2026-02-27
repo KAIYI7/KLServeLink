@@ -33,10 +33,16 @@ class BookingFirestore {
     final ref = _db.collection('bookings').doc(bookingId);
 
     await _db.runTransaction((tx) async {
-      tx.update(ref, {
+      final updates = {
         'status': bookingStatusToString(newStatus),
         'updatedAt': FieldValue.serverTimestamp(),
-      });
+      };
+
+      if (newStatus == ProviderBookingStatus.accepted) {
+        updates['acceptedAt'] = FieldValue.serverTimestamp();
+      }
+
+      tx.update(ref, updates);
 
       // history event
       final h = ref.collection('history').doc();
@@ -53,13 +59,19 @@ class BookingFirestore {
     switch (s) {
       case ProviderBookingStatus.accepted:
         return 'Accept Booking';
+      case ProviderBookingStatus.confirmed:
+        return 'Confirmed';
       case ProviderBookingStatus.completed:
         return 'Completed';
       case ProviderBookingStatus.declined:
         return 'Declined';
+      case ProviderBookingStatus.cancelled:
+        return 'Cancelled';
       case ProviderBookingStatus.pending:
-      default:
         return 'New Booking';
+      case ProviderBookingStatus.all:
+      default:
+        return 'Status updated';
     }
   }
 

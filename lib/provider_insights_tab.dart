@@ -761,7 +761,27 @@ class _BookingSummaryCard extends StatelessWidget {
   }
 }
 
-/// --- 3) Revenue Summary (sum completed) ---
+bool _isCollectedRevenue(Map<String, dynamic> b) {
+  final p = (b['payment'] is Map)
+      ? Map<String, dynamic>.from(b['payment'] as Map)
+      : <String, dynamic>{};
+
+  final method =
+  (p['method'] ?? b['paymentMethod'] ?? '').toString().toLowerCase();
+  final state = (p['state'] ?? '').toString().toLowerCase();
+
+  if (state == 'refunded') return false;
+
+  if (method == 'cash') return state == 'cash_received';
+  if (method == 'card') return state == 'captured';
+  return false;
+}
+
+bool _isEarnedRevenue(Map<String, dynamic> b) {
+  return (b['status'] ?? '').toString().toLowerCase() == 'completed';
+}
+
+/// --- Revenue Summary (sum completed) ---
 class _RevenueSummaryCard extends StatelessWidget {
   final String providerId;
   const _RevenueSummaryCard({required this.providerId});
@@ -770,12 +790,11 @@ class _RevenueSummaryCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final q = FirebaseFirestore.instance
         .collection('bookings')
-        .where('providerId', isEqualTo: providerId)
-        .where('status', isEqualTo: 'completed');
+        .where('providerId', isEqualTo: providerId);
 
     return _Card(
       title: "Revenue",
-      subtitle: "From completed bookings",
+      subtitle: "Collected vs Earned",
       child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
         stream: q.snapshots(),
         builder: (context, snap) {
@@ -786,19 +805,52 @@ class _RevenueSummaryCard extends StatelessWidget {
             );
           }
 
-          double total = 0;
+          double collected = 0.0;
+          double earned = 0.0;
+
           for (final d in snap.data!.docs) {
-            final n = d.data()['totalAmount'];
-            if (n is num) total += n.toDouble();
+            final b = d.data();
+            final n = b['totalAmount'];
+            final amt = (n is num) ? n.toDouble() : 0.0;
+
+            if (_isCollectedRevenue(b)) collected += amt;
+            if (_isEarnedRevenue(b)) earned += amt;
           }
 
           return Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Icon(Icons.insights_rounded, color: KLPalette.primary),
               const SizedBox(width: 10),
-              Text(
-                "RM ${total.toStringAsFixed(2)}",
-                style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 22),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      "RM ${collected.toStringAsFixed(2)}",
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w900,
+                        fontSize: 22,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    const Text(
+                      "Collected Revenue",
+                      style: TextStyle(
+                        color: KLPalette.text2,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      "Earned (Completed Jobs): RM ${earned.toStringAsFixed(2)}",
+                      style: const TextStyle(
+                        color: KLPalette.text2,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ],
           );

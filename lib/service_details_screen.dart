@@ -554,7 +554,7 @@ class _RuleCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Icon(
-              appliesNow ? Icons.check_circle_rounded : Icons.info_outline,
+              appliesNow ? Icons.check_circle_rounded : Icons.remove_circle_outline_rounded,
               color: appliesNow ? KLPalette.primary : KLPalette.text2,
               size: 20,
             ),
@@ -715,7 +715,7 @@ class _ServiceDetailsScaffold extends StatelessWidget {
               sliver: SliverToBoxAdapter(child: _HeaderBlock(model: model)),
             ),
 
-            // v2: sentiment + keywords section (shown only when data exists)
+            // Sentiment + keywords section (shown only when data exists)
             if (sentimentScore != null || topKeywords.isNotEmpty)
               SliverPadding(
                 padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
@@ -731,7 +731,17 @@ class _ServiceDetailsScaffold extends StatelessWidget {
             SliverPadding(
               padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
               sliver: SliverToBoxAdapter(
-                child: _DescriptionBlock(text: model.description),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      "Description",
+                      style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 20),
+                    ),
+                    const SizedBox(height: 8),
+                    _DescriptionBlock(text: model.description),
+                  ],
+                ),
               ),
             ),
 

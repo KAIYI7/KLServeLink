@@ -238,6 +238,25 @@ void _showAiSlotDetailsSheet(
   );
 }
 
+bool _isCollected(Map<String, dynamic> b) {
+  final p = (b['payment'] is Map)
+      ? Map<String, dynamic>.from(b['payment'] as Map)
+      : <String, dynamic>{};
+
+  final method =
+  (p['method'] ?? b['paymentMethod'] ?? '').toString().toLowerCase();
+  final state = (p['state'] ?? '').toString().toLowerCase();
+
+  if (state == 'refunded') return false;
+
+  if (method == 'cash') return state == 'cash_received';
+  if (method == 'card') return state == 'captured';
+  return false;
+}
+
+bool _isEarned(Map<String, dynamic> b) {
+  return (b['status'] ?? '').toString().toLowerCase() == 'completed';
+}
 
 class ProviderServiceAnalyticsScreen extends StatefulWidget {
   final ProviderServiceUi service;
@@ -365,6 +384,8 @@ class _ProviderServiceAnalyticsScreenState
                             completed = 0,
                             declined = 0;
                         double revenueCompleted = 0;
+                        double collectedRevenue = 0;
+                        double earnedRevenue = 0;
 
                         // Trend buckets
                         final bucketDays = (_rangeDays == 7) ? 1 : 7;
@@ -402,10 +423,16 @@ class _ProviderServiceAnalyticsScreenState
                           if (ts is Timestamp) dt = ts.toDate().toLocal();
 
                           // revenue (completed only)
-                          if (status == 'completed') {
-                            final amt = m['totalAmount'];
-                            if (amt is num) revenueCompleted += amt.toDouble();
-                          }
+                          // if (status == 'completed') {
+                          //   final amt = m['totalAmount'];
+                          //   if (amt is num) revenueCompleted += amt.toDouble();
+                          // }
+
+                          final amt = m['totalAmount'];
+                          final amount = (amt is num) ? amt.toDouble() : 0.0;
+
+                          if (_isCollected(m)) collectedRevenue += amount;
+                          if (_isEarned(m)) earnedRevenue += amount;
 
                           // location
                           final areaStored = (m['locationArea'] ?? '')
@@ -470,7 +497,7 @@ class _ProviderServiceAnalyticsScreenState
                             : (completed / total);
 
                         final serviceAvgPrice = (completed > 0)
-                            ? (revenueCompleted / completed)
+                            ? (earnedRevenue / completed)
                             : widget.service.price.toDouble();
 
                         // top locations list
@@ -555,43 +582,54 @@ class _ProviderServiceAnalyticsScreenState
                             const SizedBox(height: 12),
 
                             _Card(
-                              title: "Revenue (completed)",
+                              title: "Revenue",
                               subtitle: "Last $_rangeDays days",
                               child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  const Icon(
-                                    Icons.payments_rounded,
-                                    color: KLPalette.primary,
-                                  ),
+                                  const Icon(Icons.payments_rounded, color: KLPalette.primary),
                                   const SizedBox(width: 10),
-                                  Text(
-                                    "RM ${revenueCompleted.toStringAsFixed(2)}",
-                                    style: const TextStyle(
-                                      fontWeight: FontWeight.w900,
-                                      fontSize: 22,
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          "RM ${collectedRevenue.toStringAsFixed(2)}",
+                                          style: const TextStyle(
+                                            fontWeight: FontWeight.w900,
+                                            fontSize: 22,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          "Collected Revenue",
+                                          style: const TextStyle(
+                                            color: KLPalette.text2,
+                                            fontWeight: FontWeight.w800,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 6),
+                                        Text(
+                                          "Earned (Completed Jobs): RM ${earnedRevenue.toStringAsFixed(2)}",
+                                          style: const TextStyle(
+                                            color: KLPalette.text2,
+                                            fontWeight: FontWeight.w800,
+                                          ),
+                                        ),
+                                      ],
                                     ),
                                   ),
-                                  const Spacer(),
                                   if (declined > 0)
                                     Container(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 10,
-                                        vertical: 6,
-                                      ),
+                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                                       decoration: BoxDecoration(
                                         color: KLPalette.tint50,
-                                        borderRadius: BorderRadius.circular(
-                                          999,
-                                        ),
-                                        border: Border.all(
-                                          color: KLPalette.border,
-                                        ),
+                                        borderRadius: BorderRadius.circular(999),
+                                        border: Border.all(color: KLPalette.border),
                                       ),
                                       child: Text(
                                         "Declined: $declined",
-                                        style: const TextStyle(
-                                          fontWeight: FontWeight.w900,
-                                        ),
+                                        style: const TextStyle(fontWeight: FontWeight.w900),
                                       ),
                                     ),
                                 ],

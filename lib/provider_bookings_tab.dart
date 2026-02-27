@@ -38,6 +38,102 @@ class _ProviderBookingsTabState extends State<ProviderBookingsTab> {
     });
   }
 
+  void _showSortInfo(BuildContext context) {
+    String title;
+    List<String> lines;
+
+    switch (filter) {
+      case ProviderBookingStatus.pending:
+        title = "Sorting (Pending)";
+        lines = [
+          "Newest booking requests first.",
+          "Uses created/request time when available.",
+        ];
+        break;
+
+      case ProviderBookingStatus.accepted:
+      case ProviderBookingStatus.confirmed:
+        title = "Sorting (Accepted / Confirmed)";
+        lines = [
+          "Next scheduled job first (soonest first).",
+        ];
+        break;
+
+      case ProviderBookingStatus.completed:
+        title = "Sorting (Completed)";
+        lines = [
+          "Newest completed jobs first.",
+        ];
+        break;
+
+      case ProviderBookingStatus.declined:
+      case ProviderBookingStatus.cancelled:
+        title = "Sorting (Declined / Cancelled)";
+        lines = [
+          "Most recent updates first (latest decision first).",
+        ];
+        break;
+
+      case ProviderBookingStatus.all:
+      default:
+        title = "Sorting (All)";
+        lines = [
+          "Grouped by priority:",
+          "• Pending first (newest request first)",
+          "• Accepted/Confirmed next (soonest schedule first)",
+          "• Completed next (newest first)",
+          "• Declined/Cancelled last (newest update first)",
+        ];
+        break;
+    }
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: KLPalette.bg,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
+      ),
+      builder: (_) {
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 46,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: KLPalette.border,
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 14),
+              Row(
+                children: [
+                  const Icon(Icons.sort, color: KLPalette.text2),
+                  const SizedBox(width: 10),
+                  Text(title, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 18)),
+                ],
+              ),
+              const SizedBox(height: 12),
+              for (final t in lines) ...[
+                Text(
+                  t,
+                  style: const TextStyle(color: KLPalette.text2, fontWeight: FontWeight.w700, height: 1.35),
+                ),
+                const SizedBox(height: 6),
+              ],
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   List<ProviderBooking> _applySearch(List<ProviderBooking> items) {
     final q = _q.trim().toLowerCase();
     if (q.isEmpty) return items;
@@ -51,6 +147,118 @@ class _ProviderBookingsTabState extends State<ProviderBookingsTab> {
     }
 
     return items.where(match).toList();
+  }
+
+  DateTime _safeCreatedAt(ProviderBooking b) {
+    final d = b as dynamic;
+
+    try {
+      final v = d.createdAt;
+      if (v is DateTime) return v;
+    } catch (_) {}
+
+    try {
+      final v = d.created;
+      if (v is DateTime) return v;
+    } catch (_) {}
+
+    try {
+      final v = d.requestedAt;
+      if (v is DateTime) return v;
+    } catch (_) {}
+
+    // Fallback: scheduledAt
+    return b.scheduledAt;
+  }
+
+  DateTime _safeUpdatedAt(ProviderBooking b) {
+    final d = b as dynamic;
+
+    try {
+      final v = d.updatedAt;
+      if (v is DateTime) return v;
+    } catch (_) {}
+
+    try {
+      final v = d.declinedAt;
+      if (v is DateTime) return v;
+    } catch (_) {}
+
+    try {
+      final v = d.cancelledAt;
+      if (v is DateTime) return v;
+    } catch (_) {}
+
+    try {
+      final v = d.completedAt;
+      if (v is DateTime) return v;
+    } catch (_) {}
+
+    // Fallback
+    return b.scheduledAt;
+  }
+
+  int _rankStatus(ProviderBookingStatus s) {
+    // group priority in "All"
+    switch (s) {
+      case ProviderBookingStatus.pending:
+        return 0;
+      case ProviderBookingStatus.accepted:
+      case ProviderBookingStatus.confirmed:
+        return 1;
+      case ProviderBookingStatus.completed:
+        return 2;
+      case ProviderBookingStatus.declined:
+      case ProviderBookingStatus.cancelled:
+        return 3;
+      case ProviderBookingStatus.all:
+      default:
+        return 99;
+    }
+  }
+
+  int _compareProviderBookings(ProviderBooking a, ProviderBooking b) {
+    // If a specific filter is selected, apply that filter-specific ordering:
+    if (filter == ProviderBookingStatus.pending) {
+      // newest request first
+      return _safeCreatedAt(b).compareTo(_safeCreatedAt(a));
+    }
+
+    if (filter == ProviderBookingStatus.accepted || filter == ProviderBookingStatus.confirmed) {
+      // next job first
+      return a.scheduledAt.compareTo(b.scheduledAt);
+    }
+
+    if (filter == ProviderBookingStatus.completed) {
+      // newest completed first
+      return b.scheduledAt.compareTo(a.scheduledAt);
+    }
+
+    if (filter == ProviderBookingStatus.declined || filter == ProviderBookingStatus.cancelled) {
+      // most recent decision first
+      final c = _safeUpdatedAt(b).compareTo(_safeUpdatedAt(a));
+      if (c != 0) return c;
+      return b.scheduledAt.compareTo(a.scheduledAt);
+    }
+
+    // "All": group ordering + within-group ordering
+    final ra = _rankStatus(a.status);
+    final rb = _rankStatus(b.status);
+    if (ra != rb) return ra.compareTo(rb);
+
+    // Within same group:
+    if (ra == 0) {
+      // pending
+      return _safeCreatedAt(b).compareTo(_safeCreatedAt(a));
+    } else if (ra == 1) {
+      // accepted/confirmed
+      return a.scheduledAt.compareTo(b.scheduledAt);
+    } else {
+      // completed / declined / cancelled
+      final c = _safeUpdatedAt(b).compareTo(_safeUpdatedAt(a));
+      if (c != 0) return c;
+      return b.scheduledAt.compareTo(a.scheduledAt);
+    }
   }
 
   @override
@@ -72,9 +280,18 @@ class _ProviderBookingsTabState extends State<ProviderBookingsTab> {
                   const Spacer(),
                   const Text("Bookings", style: TextStyle(fontWeight: FontWeight.w900, fontSize: 22)),
                   const Spacer(),
-                  _CircleButton(
-                    icon: showSearch ? Icons.close_rounded : Icons.search,
-                    onTap: _toggleSearch,
+                  Row(
+                    children: [
+                      _CircleButton(
+                        icon: showSearch ? Icons.close_rounded : Icons.search,
+                        onTap: _toggleSearch,
+                      ),
+                      const SizedBox(width: 10),
+                      _CircleButton(
+                        icon: Icons.info_outline_rounded,
+                        onTap: () => _showSortInfo(context),
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -83,6 +300,23 @@ class _ProviderBookingsTabState extends State<ProviderBookingsTab> {
               _Segmented(
                 value: filter,
                 onChanged: (v) => setState(() => filter = v),
+              ),
+
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  filter == ProviderBookingStatus.pending
+                      ? "Sorted: newest request first"
+                      : (filter == ProviderBookingStatus.accepted || filter == ProviderBookingStatus.confirmed)
+                      ? "Sorted: next scheduled job first"
+                      : (filter == ProviderBookingStatus.completed)
+                      ? "Sorted: newest completed first"
+                      : (filter == ProviderBookingStatus.declined || filter == ProviderBookingStatus.cancelled)
+                      ? "Sorted: latest update first"
+                      : "Sorted: Pending → Accepted/Confirmed → Completed → Declined/Cancelled",
+                  style: const TextStyle(color: KLPalette.text2, fontWeight: FontWeight.w700),
+                ),
               ),
 
               if (showSearch) ...[
@@ -131,7 +365,7 @@ class _ProviderBookingsTabState extends State<ProviderBookingsTab> {
                     }
 
                     final raw = snap.data ?? const [];
-                    final items = _applySearch(raw);
+                    final items = _applySearch(raw)..sort(_compareProviderBookings);
 
                     if (items.isEmpty) {
                       // If searching, show a nicer empty message
@@ -168,7 +402,8 @@ class _ProviderBookingsTabState extends State<ProviderBookingsTab> {
                           onDecline: b.status == ProviderBookingStatus.pending
                               ? () => _update(b, ProviderBookingStatus.declined)
                               : null,
-                          onComplete: b.status == ProviderBookingStatus.accepted
+                          onComplete: (b.status == ProviderBookingStatus.accepted ||
+                              b.status == ProviderBookingStatus.confirmed)
                               ? () => _update(b, ProviderBookingStatus.completed)
                               : null,
                         );
@@ -213,45 +448,99 @@ class _Segmented extends StatelessWidget {
   Widget build(BuildContext context) {
     Widget chip(String label, ProviderBookingStatus v) {
       final selected = v == value;
-      return Expanded(
-        child: InkWell(
-          onTap: () => onChanged(v),
-          borderRadius: BorderRadius.circular(999),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 160),
-            padding: const EdgeInsets.symmetric(vertical: 12),
-            decoration: BoxDecoration(
-              color: selected ? KLPalette.primary : Colors.transparent,
-              borderRadius: BorderRadius.circular(999),
-            ),
-            child: Text(
-              label,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontWeight: FontWeight.w900,
-                color: selected ? Colors.white : KLPalette.text,
-              ),
+
+      return InkWell(
+        onTap: () => onChanged(v),
+        borderRadius: BorderRadius.circular(999),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 160),
+          constraints: const BoxConstraints(
+            minWidth: 72,
+          ),
+          padding: const EdgeInsets.symmetric(
+            horizontal: 16,
+            vertical: 10,
+          ),
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: selected ? KLPalette.primary : Colors.transparent,
+            borderRadius: BorderRadius.circular(999),
+          ),
+          child: Text(
+            label,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontWeight: FontWeight.w700,
+              color: selected ? Colors.white : KLPalette.text,
             ),
           ),
         ),
       );
     }
 
+    final statuses = [
+      ProviderBookingStatus.all,
+      ProviderBookingStatus.pending,
+      ProviderBookingStatus.accepted,
+      ProviderBookingStatus.confirmed,
+      ProviderBookingStatus.completed,
+      ProviderBookingStatus.declined,
+    ];
+
+    final labels = [
+      "All",
+      "Pending",
+      "Accepted",
+      "Confirmed",
+      "Completed",
+      "Declined",
+    ];
+
     return ClipRRect(
       borderRadius: BorderRadius.circular(999),
       child: Container(
-        padding: const EdgeInsets.all(6),
+        height: 48,
         decoration: BoxDecoration(
           color: KLPalette.bg,
           borderRadius: BorderRadius.circular(999),
-          border: Border.all(color: KLPalette.border),
+          border: Border.all(
+            color: KLPalette.border.withOpacity(0.6),
+          ),
         ),
-        child: Row(
+        child: Stack(
           children: [
-            chip("All", ProviderBookingStatus.all),
-            chip("Pending", ProviderBookingStatus.pending),
-            chip("Accepted", ProviderBookingStatus.accepted),
-            chip("Completed", ProviderBookingStatus.completed),
+            ListView.separated(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              physics: const BouncingScrollPhysics(),
+              itemCount: labels.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 8),
+              itemBuilder: (context, index) {
+                return chip(labels[index], statuses[index]);
+              },
+            ),
+
+            // Right fade to indicate scroll
+            Positioned(
+              right: 0,
+              top: 0,
+              bottom: 0,
+              child: IgnorePointer(
+                child: Container(
+                  width: 28,
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.centerLeft,
+                      end: Alignment.centerRight,
+                      colors: [
+                        KLPalette.bg.withOpacity(0),
+                        KLPalette.bg,
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
           ],
         ),
       ),
@@ -309,7 +598,10 @@ class _Empty extends StatelessWidget {
       ProviderBookingStatus.all => "No bookings yet.",
       ProviderBookingStatus.pending => "No pending bookings yet.",
       ProviderBookingStatus.accepted => "No accepted bookings yet.",
+      ProviderBookingStatus.confirmed => "No confirmed bookings yet.",
       ProviderBookingStatus.completed => "No completed bookings yet.",
+      ProviderBookingStatus.declined => "No declined bookings yet.",
+      ProviderBookingStatus.cancelled => "No cancelled bookings yet.",
       _ => "No bookings.",
     };
 
@@ -357,6 +649,11 @@ class _BookingCard extends StatelessWidget {
         pillBg = KLPalette.tint50;
         pillFg = KLPalette.primary700;
         pillText = "Accepted";
+        break;
+      case ProviderBookingStatus.confirmed:
+        pillBg = KLPalette.tint50;
+        pillFg = KLPalette.primary700;
+        pillText = "Confirmed";
         break;
       case ProviderBookingStatus.completed:
         pillBg = const Color(0xFFECFDF3);

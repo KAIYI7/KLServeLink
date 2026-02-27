@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
+import 'package:fyp_flutter/payments/card_payment_form_screen.dart';
 import 'package:fyp_flutter/utils/app_snack.dart';
 import 'package:fyp_flutter/utils/provider_public_card.dart';
 import 'package:fyp_flutter/utils/service_thumb.dart';
@@ -30,6 +31,87 @@ class BookingDetailScreen extends StatelessWidget {
     return <String, dynamic>{};
   }
 
+  bool _needsPayNow(Map<String, dynamic> b) {
+    final status = (b['status'] ?? '').toString().toLowerCase();
+    final p = _paymentMap(b);
+    final method =
+    (p['method'] ?? b['paymentMethod'] ?? '').toString().toLowerCase();
+    final state = (p['state'] ?? '').toString().toLowerCase();
+    return status == 'accepted' && method == 'card' && state == 'unpaid';
+  }
+
+  bool _cardPaidOrCaptured(Map<String, dynamic> b) {
+    final p = _paymentMap(b);
+    final method =
+    (p['method'] ?? b['paymentMethod'] ?? '').toString().toLowerCase();
+    final state = (p['state'] ?? '').toString().toLowerCase();
+    return method == 'card' && (state == 'authorized' || state == 'captured');
+  }
+
+  Future<void> _seekerCancelBooking({
+    required BuildContext context,
+    required Map<String, dynamic> bookingData,
+    required String bookingId,
+    required String reason,
+    required BookingUi booking,
+  }) async {
+    // Paid already -> refund flow
+    if (_cardPaidOrCaptured(bookingData)) {
+      showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => const Center(child: CircularProgressIndicator()),
+      );
+      try {
+        final callable =
+        FirebaseFunctions.instance.httpsCallable('cancelBookingWithRefund');
+        await callable.call({
+          'bookingId': bookingId,
+          'reason': reason.isEmpty ? 'seeker_cancelled' : reason,
+        });
+
+        // cancelReason
+        await _ref.set({
+          'cancelReason': reason,
+          'updatedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+      } finally {
+        if (context.mounted) {
+          Navigator.of(context, rootNavigator: true).pop();
+        }
+      }
+
+      if (!context.mounted) return;
+      await _showCancelSuccessDialog(context, booking, wasPaid: true);
+      if (!context.mounted) return;
+      Navigator.pop(context);
+      return;
+    }
+
+    // Not paid yet -> normal cancel
+    final batch = FirebaseFirestore.instance.batch();
+
+    batch.update(_ref, {
+      'status': 'cancelled',
+      'cancelReason': reason,
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+
+    batch.set(_ref.collection('history').doc(), {
+      'at': FieldValue.serverTimestamp(),
+      'title': 'Cancelled',
+      'subtitle': 'Cancelled by seeker',
+      'actorUid': FirebaseAuth.instance.currentUser?.uid ?? 'unknown',
+    });
+
+    await batch.commit();
+
+    if (!context.mounted) return;
+    await _showCancelSuccessDialog(context, booking, wasPaid: false);
+    if (!context.mounted) return;
+    Navigator.pop(context);
+  }
+
   bool _isCard(String method) {
     final m = method.toLowerCase();
     return m == "card" || m.contains("card");
@@ -41,7 +123,10 @@ class BookingDetailScreen extends StatelessWidget {
     if (s.contains("captur")) return false;
     if (s.contains("paid")) return false;
     if (s.contains("received")) return false;
-    return s.contains("await") || s.contains("author") || s.contains("hold") || s.contains("pending");
+    return s.contains("await") ||
+        s.contains("author") ||
+        s.contains("hold") ||
+        s.contains("pending");
   }
 
   String _paymentMethodLabel(String method) {
@@ -51,7 +136,11 @@ class BookingDetailScreen extends StatelessWidget {
     return method.isEmpty ? "Payment" : method;
   }
 
-  String _paymentStateLabel({required String method, required String state, required BookingStatus bookingStatus}) {
+  String _paymentStateLabel({
+    required String method,
+    required String state,
+    required BookingStatus bookingStatus,
+  }) {
     final m = method.toLowerCase();
     final s = state.toLowerCase();
     if (m.contains("cash")) {
@@ -60,6 +149,9 @@ class BookingDetailScreen extends StatelessWidget {
       return "Pay on service";
     }
     // Card
+    if (s == "unpaid") return "Awaiting payment";
+    if (s.contains("refund")) return "Refunded";
+    if (s.contains("author") || s.contains("hold")) return "Deposit authorized";
     if (s.contains("captur")) return "Captured";
     if (s.contains("await")) return "Awaiting your confirmation";
     if (s.contains("author") || s.contains("hold")) return "Deposit authorized";
@@ -146,7 +238,8 @@ class BookingDetailScreen extends StatelessWidget {
         final booking = BookingUi.fromDoc(doc);
         final raw = doc.data() ?? <String, dynamic>{};
         final pay = _paymentMap(raw);
-        final payMethod = (pay["method"] ?? raw["paymentMethod"] ?? booking.paymentMethod).toString();
+        final payMethod =
+        (pay["method"] ?? raw["paymentMethod"] ?? booking.paymentMethod).toString();
         final payState = (pay["state"] ?? "").toString();
         final payMethodLabel = _paymentMethodLabel(payMethod);
         final payStateLabel = _paymentStateLabel(
@@ -160,6 +253,8 @@ class BookingDetailScreen extends StatelessWidget {
         final timeText = _formatBookingTime(booking.scheduledAt);
         final isUpcoming = booking.status == BookingStatus.upcoming;
         final isReviewed = booking.isReviewed;
+        final needsPayNow = _needsPayNow(raw);
+        final canViewReceipt = _isSettledForReceipt(raw);
 
         return Scaffold(
           backgroundColor: KLPalette.bg,
@@ -179,6 +274,10 @@ class BookingDetailScreen extends StatelessWidget {
                     _TopBar(
                       title: "Booking Detail",
                       onBack: () => Navigator.pop(context),
+                      trailing: IconButton(
+                        onPressed: () => _showHistory(context, bookingId),
+                        icon: const Icon(Icons.history, color: KLPalette.text),
+                      ),
                     ),
                     const SizedBox(height: 26),
                     Expanded(
@@ -210,15 +309,11 @@ class BookingDetailScreen extends StatelessWidget {
                                     height: 60,
                                     width: 60,
                                     decoration: BoxDecoration(
-                                      color: isUpcoming
-                                          ? const Color(0xFFFBBF24)
-                                          : KLPalette.primary,
+                                      color: isUpcoming ? const Color(0xFFFBBF24) : KLPalette.primary,
                                       shape: BoxShape.circle,
                                     ),
                                     child: Icon(
-                                      isUpcoming
-                                          ? Icons.access_time_rounded
-                                          : Icons.check_rounded,
+                                      isUpcoming ? Icons.access_time_rounded : Icons.check_rounded,
                                       color: isUpcoming ? Colors.black : Colors.white,
                                       size: 28,
                                     ),
@@ -241,125 +336,195 @@ class BookingDetailScreen extends StatelessWidget {
             top: false,
             child: Padding(
               padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
-              child: Row(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Expanded(
-                    child: SizedBox(
+                  if (needsPayNow) ...[
+                    SizedBox(
+                      width: double.infinity,
                       height: 56,
                       child: FilledButton(
                         style: FilledButton.styleFrom(
-                          backgroundColor: isUpcoming
-                              ? const Color(0xFFFFE4E6)
-                              : (needsSeekerConfirm ? KLPalette.primary : KLPalette.tint100),
-                          foregroundColor: isUpcoming
-                              ? const Color(0xFFEF4444)
-                              : (needsSeekerConfirm ? Colors.white : KLPalette.primary700),
+                          backgroundColor: KLPalette.primary,
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(999),
                           ),
                         ),
                         onPressed: () async {
-                          if (isUpcoming) {
-                            final reason = await _showCancelSheet(context);
-                            if (reason == null) return;
+                          // Collect card details
+                          final meta = await Navigator.push<Map<String, dynamic>>(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => CardPaymentFormScreen(amount: booking.totalAmount),
+                            ),
+                          );
+                          if (meta == null) return; // user cancelled
 
-                            final batch = FirebaseFirestore.instance.batch();
+                          // 2) then call cloud function with paymentMeta
+                          showDialog<void>(
+                            context: context,
+                            barrierDismissible: false,
+                            builder: (_) => const Center(child: CircularProgressIndicator()),
+                          );
 
-                            batch.update(_ref, {
-                              "status": "cancelled",
-                              "cancelReason": reason,
-                              "updatedAt": FieldValue.serverTimestamp(),
+                          try {
+                            final callable = FirebaseFunctions.instance.httpsCallable('payForBooking');
+                            await callable.call({
+                              'bookingId': bookingId,
+                              'paymentMeta': meta,
                             });
 
-                            batch.set(_ref.collection("history").doc(), {
-                              "at": FieldValue.serverTimestamp(),
-                              "title": "Cancelled",
-                              "subtitle": "Cancelled by seeker",
-                              "actorUid": FirebaseAuth.instance.currentUser?.uid ?? "unknown",
-                            });
-
-                            await batch.commit();
-
                             if (!context.mounted) return;
-                            await _showCancelSuccessDialog(context, booking);
-
+                            AppSnack.show(context, "Payment authorized.", type: AppSnackType.success);
+                          } on FirebaseFunctionsException catch (e) {
                             if (!context.mounted) return;
-                            Navigator.pop(context);
-                          } else if (needsSeekerConfirm) {
-                            await _confirmServiceCompleted(context, booking.id);
-                          } else {
-                            if (isReviewed) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text("You already reviewed this booking.")),
-                              );
-                              return;
-                            }
-
-                            final submitted = await Navigator.push<bool>(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => LeaveReviewScreen(booking: booking, nav: nav),
-                              ),
-                            );
-
-                            if (submitted == true) {
-                              await _ref.update({
-                                "isReviewed": true,
-                                "updatedAt": FieldValue.serverTimestamp(),
-                              });
+                            AppSnack.show(context, e.message ?? "Payment failed.", type: AppSnackType.error);
+                          } finally {
+                            if (context.mounted) {
+                              Navigator.of(context, rootNavigator: true).pop();
                             }
                           }
                         },
-                        child: Text(
-                          isUpcoming
-                              ? "Cancel Booking"
-                              : (needsSeekerConfirm
-                              ? "Confirm Completed"
-                              : (isReviewed ? "Reviewed" : "Leave a Review")),
-                          style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 14),
+                        child: const Text(
+                          'Pay Now',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w900,
+                            fontSize: 14,
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: SizedBox(
-                      height: 56,
-                      child: FilledButton(
-                        style: FilledButton.styleFrom(
-                          backgroundColor: KLPalette.primary,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
-                        ),
-                        onPressed: () async {
-                          final heroUrl = await fetchServiceHeroUrl(booking.serviceId);
-                          if (!context.mounted) return;
-
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => DetailPaymentScreen(
-                                nav: nav,
-                                serviceTitle: booking.title,
-                                rating: booking.serviceRating,
-                                locationText: booking.locationText,
-                                paymentMethod: payMethodLabel,
-                                paymentStatus: payStateLabel,
-                                paymentData: pay,
-                                date: booking.scheduledAt,
-                                startTime: _formatStartTime(booking.scheduledAt),
-                                transactionId: bookingId,
-                                totalAmount: booking.totalAmount,
-                                serviceImageUrl: heroUrl,
+                    const SizedBox(height: 10),
+                  ],
+                  Row(
+                    children: [
+                      Expanded(
+                        child: SizedBox(
+                          height: 56,
+                          child: FilledButton(
+                            style: FilledButton.styleFrom(
+                              backgroundColor: isUpcoming
+                                  ? const Color(0xFFFFE4E6)
+                                  : (needsSeekerConfirm ? KLPalette.primary : KLPalette.tint100),
+                              foregroundColor: isUpcoming
+                                  ? const Color(0xFFEF4444)
+                                  : (needsSeekerConfirm ? Colors.white : KLPalette.primary700),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(999),
                               ),
                             ),
-                          );
-                        },
-                        child: const Text(
-                          "E-Receipt",
-                          style: TextStyle(fontWeight: FontWeight.w900, fontSize: 14),
+                            onPressed: () async {
+                              if (isUpcoming) {
+                                final reason = await _showCancelSheet(context);
+                                if (reason == null) return;
+
+                                await _seekerCancelBooking(
+                                  context: context,
+                                  bookingData: raw,
+                                  bookingId: bookingId,
+                                  reason: reason,
+                                  booking: booking,
+                                );
+                              } else if (needsSeekerConfirm) {
+                                await _confirmServiceCompleted(
+                                  context,
+                                  booking.id,
+                                );
+                              } else {
+                                if (isReviewed) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text(
+                                        "You already reviewed this booking.",
+                                      ),
+                                    ),
+                                  );
+                                  return;
+                                }
+
+                                final submitted = await Navigator.push<bool>(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => LeaveReviewScreen(
+                                      booking: booking,
+                                      nav: nav,
+                                    ),
+                                  ),
+                                );
+
+                                if (submitted == true) {
+                                  await _ref.update({
+                                    'isReviewed': true,
+                                    'updatedAt': FieldValue.serverTimestamp(),
+                                  });
+                                }
+                              }
+                            },
+                            child: Text(
+                              isUpcoming
+                                  ? 'Cancel Booking'
+                                  : (needsSeekerConfirm
+                                  ? 'Confirm Completed'
+                                  : (isReviewed ? 'Reviewed' : 'Leave a Review')),
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w900,
+                                fontSize: 14,
+                              ),
+                            ),
+                          ),
                         ),
                       ),
-                    ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: SizedBox(
+                          height: 56,
+                          child: FilledButton(
+                            style: FilledButton.styleFrom(
+                              backgroundColor: KLPalette.primary,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(999),
+                              ),
+                            ),
+                            onPressed: () async {
+                              if (!canViewReceipt) {
+                                AppSnack.show(context, _receiptBlockedMessage(raw), type: AppSnackType.info);
+                                return;
+                              }
+
+                              final heroUrl = await fetchServiceHeroUrl(booking.serviceId);
+                              if (!context.mounted) return;
+
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => DetailPaymentScreen(
+                                    nav: nav,
+                                    serviceTitle: booking.title,
+                                    rating: booking.serviceRating,
+                                    locationText: booking.locationText,
+                                    paymentMethod: payMethodLabel,
+                                    paymentStatus: payStateLabel,
+                                    paymentData: pay,
+                                    date: booking.scheduledAt,
+                                    startTime: _formatStartTime(booking.scheduledAt),
+                                    transactionId: bookingId,
+                                    totalAmount: booking.totalAmount,
+                                    serviceImageUrl: heroUrl,
+                                  ),
+                                ),
+                              );
+                            },
+                            child: const Text(
+                              'E-Receipt',
+                              style: TextStyle(
+                                fontWeight: FontWeight.w900,
+                                fontSize: 14,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -435,7 +600,7 @@ class BookingDetailScreen extends StatelessWidget {
                     ),
                     const SizedBox(height: 14),
                     const Text(
-                      "Only 80% of the money you can refund from\nyour payment according to our policy",
+                      "You can fully refund your payment according to our policy",
                       textAlign: TextAlign.center,
                       style: TextStyle(color: KLPalette.text2, fontWeight: FontWeight.w700, height: 1.35),
                     ),
@@ -570,8 +735,18 @@ class BookingDetailScreen extends StatelessWidget {
     );
   }
 
-  Future<void> _showCancelSuccessDialog(BuildContext context, BookingUi booking) {
-    final refund = (booking.totalAmount * 0.8);
+  Future<void> _showCancelSuccessDialog(
+      BuildContext context,
+      BookingUi booking, {
+        required bool wasPaid,
+      }) {
+    final refund = booking.totalAmount;
+
+    final message = wasPaid
+        ? "Your service booking has been successfully canceled. "
+        "A refund of RM ${refund.toStringAsFixed(0)} will be returned to your account."
+        : "Your service booking has been successfully canceled. "
+        "No payment was made. You won’t be charged.";
 
     return showDialog(
       context: context,
@@ -602,7 +777,7 @@ class BookingDetailScreen extends StatelessWidget {
                   ),
                   const SizedBox(height: 12),
                   Text(
-                    "You have successfully canceled your service\nbooking. 80% funds will be returned to your\naccount. RM ${refund.toStringAsFixed(0)}",
+                    message,
                     textAlign: TextAlign.center,
                     style: const TextStyle(
                       color: KLPalette.text2,
@@ -618,7 +793,9 @@ class BookingDetailScreen extends StatelessWidget {
                       style: FilledButton.styleFrom(
                         backgroundColor: KLPalette.primary,
                         foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(999),
+                        ),
                       ),
                       onPressed: () => Navigator.pop(context),
                       child: const Text(
@@ -634,6 +811,164 @@ class BookingDetailScreen extends StatelessWidget {
         );
       },
     );
+  }
+
+  void _showHistory(BuildContext context, String bookingId) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: KLPalette.bg,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
+      ),
+      builder: (_) {
+        final ref = FirebaseFirestore.instance
+            .collection('bookings')
+            .doc(bookingId)
+            .collection('history')
+            .orderBy('at', descending: true);
+
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(20, 14, 20, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                height: 4,
+                width: 46,
+                decoration: BoxDecoration(
+                  color: KLPalette.border,
+                  borderRadius: BorderRadius.circular(999),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  const Text(
+                    "Booking History",
+                    style: TextStyle(fontWeight: FontWeight.w900, fontSize: 18),
+                  ),
+                  const Spacer(),
+                  Text(
+                    "ID: #${bookingId.substring(0, 6)}",
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w800,
+                      color: KLPalette.text2,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+
+              SizedBox(
+                height: 340,
+                child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                  stream: ref.snapshots(),
+                  builder: (context, snap) {
+                    if (!snap.hasData) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
+                    final docs = snap.data!.docs;
+                    if (docs.isEmpty) return const Center(child: Text("No history yet"));
+
+                    return ListView.separated(
+                      itemCount: docs.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 12),
+                      itemBuilder: (_, i) {
+                        final d = docs[i].data();
+                        final at = (d['at'] as Timestamp?)?.toDate();
+                        final title = (d['title'] ?? 'Update').toString();
+                        final sub = (d['subtitle'] ?? '').toString();
+
+                        return Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Container(
+                              height: 12,
+                              width: 12,
+                              margin: const EdgeInsets.only(top: 6),
+                              decoration: const BoxDecoration(
+                                color: KLPalette.primary,
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    title,
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w900,
+                                      fontSize: 16,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    sub,
+                                    style: const TextStyle(
+                                      color: KLPalette.text2,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                  if (at != null) ...[
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      "${at.day}/${at.month}/${at.year} "
+                                          "${at.hour.toString().padLeft(2, '0')}:${at.minute.toString().padLeft(2, '0')}",
+                                      style: const TextStyle(
+                                        color: KLPalette.text2,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                          ],
+                        );
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  bool _isSettledForReceipt(Map<String, dynamic> raw) {
+    final p = _paymentMap(raw);
+    final method = (p['method'] ?? raw['paymentMethod'] ?? '').toString().toLowerCase();
+    final state = (p['state'] ?? '').toString().toLowerCase();
+
+    if (method.contains('card')) {
+      // allow receipt only when money is settled
+      return state == 'captured' || state == 'refunded';
+    }
+    if (method.contains('cash')) {
+      return state == 'cash_received'; // cash settled
+    }
+    return false;
+  }
+
+  String _receiptBlockedMessage(Map<String, dynamic> raw) {
+    final p = _paymentMap(raw);
+    final method = (p['method'] ?? raw['paymentMethod'] ?? '').toString().toLowerCase();
+    final state = (p['state'] ?? '').toString().toLowerCase();
+
+    if (method.contains('card') && state == 'unpaid') {
+      return "Receipt will be available after you pay (Pay Now).";
+    }
+    if (method.contains('card') && state == 'authorized') {
+      return "Receipt will be available after service completion is confirmed (payment captured).";
+    }
+    if (method.contains('cash') && state == 'cash_due') {
+      return "Receipt will be available after the provider confirms cash received.";
+    }
+    return "Receipt will be available after payment is completed.";
   }
 }
 
@@ -690,12 +1025,16 @@ class _ConfettiCheck extends StatelessWidget {
   }
 }
 
-
 class _TopBar extends StatelessWidget {
   final String title;
   final VoidCallback onBack;
+  final Widget? trailing;
 
-  const _TopBar({required this.title, required this.onBack});
+  const _TopBar({
+    required this.title,
+    required this.onBack,
+    this.trailing,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -718,7 +1057,11 @@ class _TopBar extends StatelessWidget {
         const Spacer(),
         Text(title, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 22)),
         const Spacer(),
-        const SizedBox(width: 48),
+        SizedBox(
+          width: 48,
+          height: 48,
+          child: Center(child: trailing),
+        ),
       ],
     );
   }
@@ -793,18 +1136,19 @@ class _MainCard extends StatelessWidget {
                                       child: Text(
                                         booking.title,
                                         style: const TextStyle(
-                                            fontWeight: FontWeight.w900,
-                                            fontSize: 22),
+                                          fontWeight: FontWeight.w900,
+                                          fontSize: 22,
+                                        ),
                                       ),
                                     ),
-                                    const Icon(Icons.star_rounded,
-                                        color: Color(0xFFFBBF24)),
+                                    const Icon(Icons.star_rounded, color: Color(0xFFFBBF24)),
                                     const SizedBox(width: 4),
                                     Text(
                                       booking.serviceRating.toStringAsFixed(1),
                                       style: const TextStyle(
-                                          fontWeight: FontWeight.w900,
-                                          fontSize: 18),
+                                        fontWeight: FontWeight.w900,
+                                        fontSize: 18,
+                                      ),
                                     ),
                                   ],
                                 ),
@@ -812,21 +1156,22 @@ class _MainCard extends StatelessWidget {
                                 Text(
                                   "RM ${booking.totalAmount.toStringAsFixed(2)}",
                                   style: const TextStyle(
-                                      fontWeight: FontWeight.w900,
-                                      fontSize: 34),
+                                    fontWeight: FontWeight.w900,
+                                    fontSize: 34,
+                                  ),
                                 ),
                                 const SizedBox(height: 8),
                                 Row(
                                   children: [
-                                    const Icon(Icons.place, size: 18,
-                                        color: KLPalette.text2),
+                                    const Icon(Icons.place, size: 18, color: KLPalette.text2),
                                     const SizedBox(width: 6),
                                     Expanded(
                                       child: Text(
                                         booking.locationText,
                                         style: const TextStyle(
-                                            color: KLPalette.text2,
-                                            fontWeight: FontWeight.w800),
+                                          color: KLPalette.text2,
+                                          fontWeight: FontWeight.w800,
+                                        ),
                                       ),
                                     ),
                                   ],
@@ -852,8 +1197,7 @@ class _MainCard extends StatelessWidget {
                       _KeyValueRow(
                         label: "Time",
                         valueText: timeText,
-                        valueStyle: const TextStyle(fontWeight: FontWeight.w900,
-                            fontSize: 18),
+                        valueStyle: const TextStyle(fontWeight: FontWeight.w900, fontSize: 18),
                       ),
 
                       const SizedBox(height: 14),
@@ -862,10 +1206,8 @@ class _MainCard extends StatelessWidget {
 
                       _KeyValueRow(
                         label: "Total Amount",
-                        valueText: "RM ${booking.totalAmount.toStringAsFixed(
-                            2)}",
-                        valueStyle: const TextStyle(fontWeight: FontWeight.w900,
-                            fontSize: 28),
+                        valueText: "RM ${booking.totalAmount.toStringAsFixed(2)}",
+                        valueStyle: const TextStyle(fontWeight: FontWeight.w900, fontSize: 28),
                       ),
 
                       const SizedBox(height: 14),
@@ -906,30 +1248,24 @@ class _MainCard extends StatelessWidget {
                                 children: [
                                   const Text(
                                     "Your Review",
-                                    style: TextStyle(
-                                        fontWeight: FontWeight.w900,
-                                        fontSize: 18),
+                                    style: TextStyle(fontWeight: FontWeight.w900, fontSize: 18),
                                   ),
                                   const Spacer(),
                                   Container(
-                                    padding: const EdgeInsets.symmetric(
-                                        horizontal: 10, vertical: 6),
+                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                                     decoration: BoxDecoration(
                                       color: Colors.white,
                                       borderRadius: BorderRadius.circular(999),
-                                      border: Border.all(
-                                          color: KLPalette.border),
+                                      border: Border.all(color: KLPalette.border),
                                     ),
                                     child: Row(
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
-                                        const Icon(Icons.star_rounded, size: 18,
-                                            color: Color(0xFFFBBF24)),
+                                        const Icon(Icons.star_rounded, size: 18, color: Color(0xFFFBBF24)),
                                         const SizedBox(width: 6),
                                         Text(
                                           "${booking.reviewStars}.0",
-                                          style: const TextStyle(
-                                              fontWeight: FontWeight.w900),
+                                          style: const TextStyle(fontWeight: FontWeight.w900),
                                         ),
                                       ],
                                     ),
@@ -941,8 +1277,7 @@ class _MainCard extends StatelessWidget {
 
                               Row(
                                 children: [
-                                  const Icon(Icons.event, size: 18,
-                                      color: KLPalette.text2),
+                                  const Icon(Icons.event, size: 18, color: KLPalette.text2),
                                   const SizedBox(width: 6),
                                   Text(
                                     _ddmmyyyy(booking.reviewedAt),
@@ -956,9 +1291,7 @@ class _MainCard extends StatelessWidget {
                                 ],
                               ),
 
-                              if ((booking.reviewText ?? "")
-                                  .trim()
-                                  .isNotEmpty) ...[
+                              if ((booking.reviewText ?? "").trim().isNotEmpty) ...[
                                 const SizedBox(height: 12),
                                 Text(
                                   booking.reviewText!.trim(),
@@ -967,17 +1300,16 @@ class _MainCard extends StatelessWidget {
                                     height: 1.35,
                                   ),
                                 ),
-                              ] else
-                                ...[
-                                  const SizedBox(height: 10),
-                                  const Text(
-                                    "No written comment.",
-                                    style: TextStyle(
-                                      color: KLPalette.text2,
-                                      fontWeight: FontWeight.w800,
-                                    ),
+                              ] else ...[
+                                const SizedBox(height: 10),
+                                const Text(
+                                  "No written comment.",
+                                  style: TextStyle(
+                                    color: KLPalette.text2,
+                                    fontWeight: FontWeight.w800,
                                   ),
-                                ],
+                                ),
+                              ],
                             ],
                           ),
                         ),

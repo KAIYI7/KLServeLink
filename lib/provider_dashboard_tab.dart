@@ -2870,60 +2870,81 @@ class _AiHighOppDrilldownList extends StatelessWidget {
                 ),
                 const SizedBox(height: 10),
 
-                if (allowedHours.isEmpty)
-                  const Text(
-                    "Closed (Working Hours disabled).",
-                    style: TextStyle(color: KLPalette.text2, fontWeight: FontWeight.w800),
-                  )
-                else if (chips.isEmpty)
-                  const Text(
-                    "No AI suggestions for this day yet.",
-                    style: TextStyle(color: KLPalette.text2, fontWeight: FontWeight.w800),
-                  )
-                else
-                  Wrap(
-                    spacing: 10,
-                    runSpacing: 10,
-                    children: chips.map((c) {
-                      final outsideBg = const Color(0xFFFFFBEB);
-                      final outsideText = const Color(0xFFB45309);
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
 
-                      final bg = c.outsideWh ? outsideBg : KLPalette.tint50;
-                      final timeColor = c.outsideWh ? outsideText : KLPalette.primary700;
-                      final labelColor = c.outsideWh ? outsideText : KLPalette.text;
+                    if (allowedHours.isEmpty)
+                      const Text(
+                        "Working hours are disabled for this day.\n",
+                        style: TextStyle(
+                          color: KLPalette.text2,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
 
-                      Widget chipBody = Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                        decoration: BoxDecoration(
-                          color: bg,
+                    if (chips.isEmpty)
+                      const Text(
+                        "No AI suggestions for this day yet.",
+                        style: TextStyle(
+                          color: KLPalette.text2,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+
+                    Wrap(
+                      spacing: 10,
+                      runSpacing: 10,
+                      children: chips.map((c) {
+                        final outsideBg = const Color(0xFFFFFBEB);
+                        final outsideText = const Color(0xFFB45309);
+
+                        final bg = c.outsideWh ? outsideBg : KLPalette.tint50;
+                        final timeColor =
+                        c.outsideWh ? outsideText : KLPalette.primary700;
+                        final labelColor =
+                        c.outsideWh ? outsideText : KLPalette.text;
+
+                        Widget chipBody = Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                          decoration: BoxDecoration(
+                            color: bg,
+                            borderRadius: BorderRadius.circular(999),
+                            border: Border.all(color: KLPalette.border),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                "${c.hour.toString().padLeft(2, '0')}:00",
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w900,
+                                  color: timeColor,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                c.label,
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w900,
+                                  color: labelColor,
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+
+                        if (!c.isAi || c.slot == null) return chipBody;
+
+                        return InkWell(
                           borderRadius: BorderRadius.circular(999),
-                          border: Border.all(color: KLPalette.border),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              "${c.hour.toString().padLeft(2, '0')}:00",
-                              style: TextStyle(fontWeight: FontWeight.w900, color: timeColor),
-                            ),
-                            const SizedBox(width: 8),
-                            Text(
-                              c.label,
-                              style: TextStyle(fontWeight: FontWeight.w900, color: labelColor),
-                            ),
-                          ],
-                        ),
-                      );
-
-                      if (!c.isAi || c.slot == null) return chipBody;
-
-                      return InkWell(
-                        borderRadius: BorderRadius.circular(999),
-                        onTap: () => _showSlotDetails(context, c.slot!),
-                        child: chipBody,
-                      );
-                    }).toList(),
-                  ),
+                          onTap: () => _showSlotDetails(context, c.slot!),
+                          child: chipBody,
+                        );
+                      }).toList(),
+                    ),
+                  ],
+                ),
 
                 const SizedBox(height: 10),
                 const Text(

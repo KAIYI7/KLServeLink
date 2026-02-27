@@ -16,6 +16,7 @@ import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { onDocumentCreated, onDocumentUpdated } from "firebase-functions/v2/firestore";
 import { evaluatePricing, haversineKm, PricingRule, PricingCaps } from "./pricing";
 import * as logger from "firebase-functions/logger";
+import { onSchedule } from "firebase-functions/v2/scheduler";
 
 // Start writing functions
 // https://firebase.google.com/docs/functions/typescript
@@ -320,12 +321,11 @@ export const createBookingVerified = onCall(async (req) => {
     paymentMethodId === "card"
       ? {
           method: "card",
-          state: "authorized",
+          state: "unpaid",
           amount: quote.total,
           currency: "MYR",
           cardBrand: paymentMeta.cardBrand ?? null,
           cardLast4: paymentMeta.cardLast4 ?? null,
-          authorizedAt: admin.firestore.FieldValue.serverTimestamp(),
           payoutStatus: "none",
         }
       : {
@@ -398,6 +398,81 @@ export const createBookingVerified = onCall(async (req) => {
     distanceKm,
     quote,
   };
+});
+
+export const payForBooking = onCall(async (req) => {
+  const uid = req.auth?.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Login required.");
+
+  const bookingId = String(req.data?.bookingId ?? "").trim();
+  if (!bookingId) throw new HttpsError("invalid-argument", "Missing bookingId");
+
+  // PaymentMeta
+  const metaRaw = req.data?.paymentMeta;
+  let metaBrand: string | null = null;
+  let metaLast4: string | null = null;
+  if (metaRaw && typeof metaRaw === "object") {
+    const mm: any = metaRaw;
+    const b = mm.cardBrand;
+    const l4 = mm.cardLast4;
+    if (typeof b === "string" && b.trim()) metaBrand = b.trim();
+    if (typeof l4 === "string" && l4.trim()) metaLast4 = l4.trim();
+  }
+
+  const ref = admin.firestore().collection("bookings").doc(bookingId);
+
+  await admin.firestore().runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists) throw new HttpsError("not-found", "Booking not found");
+
+    const b = snap.data() as any;
+
+    // Only seeker can pay
+    if (String(b.seekerId ?? "") !== uid) {
+      throw new HttpsError("permission-denied", "Not your booking");
+    }
+
+    // Must be accepted first
+    if (String(b.status ?? "") !== "accepted") {
+      throw new HttpsError("failed-precondition", "Booking not accepted yet");
+    }
+
+    const p = (b.payment ?? {}) as any;
+    const method = String(p.method ?? b.paymentMethod ?? "").toLowerCase();
+    const state = String(p.state ?? "").toLowerCase();
+
+    if (method !== "card") {
+      throw new HttpsError("failed-precondition", "Not a card booking");
+    }
+    if (state !== "unpaid") {
+      throw new HttpsError("failed-precondition", "Already paid or not payable");
+    }
+
+    tx.set(
+      ref,
+      {
+        status: "confirmed",
+        payment: {
+          ...p,
+          state: "authorized",
+          cardBrand: metaBrand ?? p.cardBrand ?? null,
+          cardLast4: metaLast4 ?? p.cardLast4 ?? null,
+          authorizedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+
+    tx.create(ref.collection("history").doc(), {
+      at: admin.firestore.FieldValue.serverTimestamp(),
+      title: "Payment authorized",
+      subtitle: "Seeker paid after provider acceptance",
+      actorUid: uid,
+    });
+  });
+
+  return { ok: true };
 });
 
 export const confirmServiceCompleted = onCall(async (req) => {
@@ -514,6 +589,120 @@ export const confirmCashReceived = onCall(async (req) => {
 
   return { ok: true };
 });
+
+export const cancelBookingWithRefund = onCall(async (req) => {
+  const uid = req.auth?.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Login required.");
+
+  const bookingId = String(req.data?.bookingId ?? "").trim();
+  const reason = String(req.data?.reason ?? "").trim();
+  if (!bookingId) throw new HttpsError("invalid-argument", "Missing bookingId");
+
+  const ref = admin.firestore().collection("bookings").doc(bookingId);
+
+  await admin.firestore().runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists) throw new HttpsError("not-found", "Booking not found");
+
+    const b = snap.data() as any;
+
+    const isSeeker = String(b.seekerId ?? "") === uid;
+    const isProvider = String(b.providerId ?? "") === uid;
+    if (!isSeeker && !isProvider) {
+      throw new HttpsError("permission-denied", "Not allowed");
+    }
+
+    const newStatus = isSeeker ? "cancelled" : "declined";
+
+    const p = (b.payment ?? {}) as any;
+    const method = String(p.method ?? b.paymentMethod ?? "");
+    const state = String(p.state ?? "").toLowerCase();
+
+    const now = admin.firestore.FieldValue.serverTimestamp();
+
+    let paymentUpdate: any | null = null;
+
+    if (method === "card") {
+      // unpaid => no refund needed
+      if (state === "authorized" || state === "captured") {
+        paymentUpdate = {
+          ...p,
+          state: "refunded",
+          refundedAt: now,
+          refundReason:
+            reason || (isSeeker ? "seeker_cancelled" : "provider_declined"),
+          refundedBy: uid,
+        };
+      }
+    }
+
+    tx.set(
+      ref,
+      {
+        status: newStatus,
+        payment: paymentUpdate ?? p,
+        updatedAt: now,
+        cancelledAt: now,
+        cancelledBy: uid,
+      },
+      { merge: true }
+    );
+
+    tx.create(ref.collection("history").doc(), {
+      at: now,
+      title: "Booking cancelled",
+      subtitle: paymentUpdate ? "Refund processed" : "Cancelled before payment",
+      actorUid: uid,
+    });
+  });
+
+  return { ok: true };
+});
+
+export const sweepUnpaidAcceptedBookings = onSchedule(
+  { schedule: "every 10 minutes", timeZone: "Asia/Kuala_Lumpur" },
+  async () => {
+    const cutoff = admin.firestore.Timestamp.fromMillis(
+      Date.now() - 30 * 60 * 1000
+    );
+
+    const q = await admin
+      .firestore()
+      .collection("bookings")
+      .where("status", "==", "accepted")
+      .where("payment.state", "==", "unpaid")
+      .where("acceptedAt", "<", cutoff)
+      .limit(200)
+      .get();
+
+    if (q.empty) return;
+
+    const batch = admin.firestore().batch();
+
+    q.docs.forEach((doc) => {
+      batch.set(
+        doc.ref,
+        {
+          status: "cancelled",
+          cancelReason: "payment_timeout",
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          cancelledAt: admin.firestore.FieldValue.serverTimestamp(),
+          cancelledBy: "system",
+        },
+        { merge: true }
+      );
+
+      batch.create(doc.ref.collection("history").doc(), {
+        at: admin.firestore.FieldValue.serverTimestamp(),
+        title: "Auto-cancelled",
+        subtitle: "Payment timeout (not paid after acceptance)",
+        actorUid: "system",
+      });
+    });
+
+    await batch.commit();
+  }
+);
 
 export const onBookingCreated = onDocumentCreated("bookings/{bookingId}", async (event) => {
   const snap = event.data;

@@ -5,6 +5,7 @@ import 'package:fyp_flutter/ui/service_pricing_vm.dart';
 import 'package:fyp_flutter/seeker_nav_controller.dart';
 import 'package:fyp_flutter/utils/datetime_slot.dart';
 import 'package:fyp_flutter/utils/location_area.dart';
+import 'booking_detail_screen.dart';
 import 'booking_firestore.dart';
 import 'detail_payment_screen.dart';
 import 'payments/card_payment_form_screen.dart';
@@ -862,7 +863,7 @@ class _BookingRuleCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Icon(
-              appliesNow ? Icons.check_circle_rounded : Icons.info_outline,
+              appliesNow ? Icons.check_circle_rounded : Icons.remove_circle_outline_rounded,
               color: appliesNow ? KLPalette.primary : KLPalette.text2,
               size: 20,
             ),
@@ -1893,17 +1894,17 @@ class BookingSummaryScreen extends StatelessWidget {
                   // --- Card payment simulation (collect card details before creating booking) ---
                   final methodId = payment.id.toString();
                   final isCard = methodId.toLowerCase() == 'card' || methodId.toLowerCase().contains('card');
-                  Map<String, dynamic>? paymentMeta;
-                  if (isCard) {
-                    final meta = await Navigator.push<Map<String, dynamic>>(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => CardPaymentFormScreen(amount: q.total),
-                      ),
-                    );
-                    if (meta == null) return; // cancelled
-                    paymentMeta = meta;
-                  }
+                  // Map<String, dynamic>? paymentMeta;
+                  // if (isCard) {
+                  //   final meta = await Navigator.push<Map<String, dynamic>>(
+                  //     context,
+                  //     MaterialPageRoute(
+                  //       builder: (_) => CardPaymentFormScreen(amount: q.total),
+                  //     ),
+                  //   );
+                  //   if (meta == null) return; // cancelled
+                  //   paymentMeta = meta;
+                  // }
 
                   // Loading dialog while calling Cloud Function
                   showDialog<void>(
@@ -1929,7 +1930,7 @@ class BookingSummaryScreen extends StatelessWidget {
                     "locationGeohash": address.geohash,
 
                     "paymentMethodId": methodId,
-                    if (paymentMeta != null) "paymentMeta": paymentMeta,
+                    //if (paymentMeta != null) "paymentMeta": paymentMeta,
                   });
 
                   if (context.mounted) {
@@ -1948,29 +1949,42 @@ class BookingSummaryScreen extends StatelessWidget {
                     builder: (dialogContext) => _BookingSuccessDialog(
                       onViewReceipt: () => Navigator.pop(dialogContext, _BookingSuccessAction.viewReceipt),
                       onMessageWorkers: () => Navigator.pop(dialogContext, _BookingSuccessAction.messageWorkers),
+                      subtitle: isCard
+                          ? "Request sent. You will pay after the provider accepts your booking."
+                          : "Request sent. You will pay in cash during/after the service.",
                     ),
                   );
 
                   if (!context.mounted) return;
 
                   if (action == _BookingSuccessAction.viewReceipt) {
-                    final heroUrl = await fetchServiceHeroUrl(service.id);
-                    if (!context.mounted) return;
+                    // final heroUrl = await fetchServiceHeroUrl(service.id);
+                    // if (!context.mounted) return;
+                    //
+                    // Navigator.push(
+                    //   context,
+                    //   MaterialPageRoute(
+                    //     builder: (_) => DetailPaymentScreen(
+                    //       nav: nav,
+                    //       serviceTitle: service.title,
+                    //       rating: service.rating,
+                    //       locationText: service.location,
+                    //       paymentMethod: payment.label,
+                    //       date: date,
+                    //       startTime: startTime,
+                    //       transactionId: bookingId,
+                    //       totalAmount: totalAmount,
+                    //       serviceImageUrl: heroUrl,
+                    //     ),
+                    //   ),
+                    // );
 
                     Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (_) => DetailPaymentScreen(
+                        builder: (_) => BookingDetailScreen(
+                          bookingId: bookingId,
                           nav: nav,
-                          serviceTitle: service.title,
-                          rating: service.rating,
-                          locationText: service.location,
-                          paymentMethod: payment.label,
-                          date: date,
-                          startTime: startTime,
-                          transactionId: bookingId,
-                          totalAmount: totalAmount,
-                          serviceImageUrl: heroUrl,
                         ),
                       ),
                     );
@@ -2025,10 +2039,12 @@ enum _BookingSuccessAction { viewReceipt, messageWorkers }
 class _BookingSuccessDialog extends StatelessWidget {
   final VoidCallback onViewReceipt;
   final VoidCallback onMessageWorkers;
+  final String subtitle;
 
   const _BookingSuccessDialog({
     required this.onViewReceipt,
     required this.onMessageWorkers,
+    required this.subtitle,
   });
 
   @override
@@ -2070,10 +2086,14 @@ class _BookingSuccessDialog extends StatelessWidget {
                 style: TextStyle(fontWeight: FontWeight.w900, fontSize: 22),
               ),
               const SizedBox(height: 8),
-              const Text(
-                "Payment will be handled by selected method",
+              Text(
+                subtitle,
                 textAlign: TextAlign.center,
-                style: TextStyle(color: KLPalette.text2, fontWeight: FontWeight.w700, height: 1.3),
+                style: const TextStyle(
+                  color: KLPalette.text2,
+                  fontWeight: FontWeight.w700,
+                  height: 1.3,
+                ),
               ),
               const SizedBox(height: 18),
 
@@ -2087,7 +2107,7 @@ class _BookingSuccessDialog extends StatelessWidget {
                   ),
                   onPressed: onViewReceipt,
                   child: const Text(
-                    "View E-Receipt",
+                    "View Booking Details",
                     style: TextStyle(fontWeight: FontWeight.w900),
                   ),
                 ),
