@@ -121,6 +121,7 @@ class ServiceDetailsScreen extends StatefulWidget {
           sentimentScore: s.sentimentScore,
           topKeywords: s.topKeywords,
           reviewsAnalyzed: s.reviewsAnalyzed,
+          autoLockTimeSlots: s.autoLockTimeSlots,
         );
       },
     );
@@ -648,6 +649,8 @@ class _ServiceDetailsScaffold extends StatelessWidget {
   final List<String> topKeywords;
   final int? reviewsAnalyzed;
 
+  final bool autoLockTimeSlots;
+
   const _ServiceDetailsScaffold({
     required this.model,
     required this.nav,
@@ -661,6 +664,7 @@ class _ServiceDetailsScaffold extends StatelessWidget {
     this.sentimentScore,
     this.topKeywords = const [],
     this.reviewsAnalyzed,
+    required this.autoLockTimeSlots,
   });
 
   @override
@@ -890,6 +894,7 @@ class _ServiceDetailsScaffold extends StatelessWidget {
               pricingCaps: pricingCaps,
               providerLat: providerLat,
               providerLng: providerLng,
+              autoLockTimeSlots: autoLockTimeSlots,
             );
 
             Navigator.push(

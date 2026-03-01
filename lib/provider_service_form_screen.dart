@@ -37,6 +37,7 @@ class _ProviderServiceFormScreenState extends State<ProviderServiceFormScreen> {
   ServiceType type = ServiceType.onsite;
   ServiceStatus status = ServiceStatus.active;
   bool featured = false;
+  bool _autoLockTimeSlots = true;
   double? serviceLat;
   double? serviceLng;
   String? serviceGeohash;
@@ -81,6 +82,7 @@ class _ProviderServiceFormScreenState extends State<ProviderServiceFormScreen> {
       type = s.type;
       status = s.status;
       featured = s.featured;
+      _autoLockTimeSlots = s.autoLockTimeSlots;
       serviceLat = s.lat;
       serviceLng = s.lng;
       serviceGeohash = s.geohash;
@@ -219,6 +221,7 @@ class _ProviderServiceFormScreenState extends State<ProviderServiceFormScreen> {
         address: addr,
         type: type,
         status: status,
+        autoLockTimeSlots: _autoLockTimeSlots,
         photoUrls: finalPhotoUrls,
         thumbnailUrl: thumb,
         price: price,
@@ -513,6 +516,63 @@ class _ProviderServiceFormScreenState extends State<ProviderServiceFormScreen> {
                               ),
                             ],
                           ),
+
+                          const SizedBox(height: 12),
+
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                          decoration: BoxDecoration(
+                            color: KLPalette.bg,
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        const Expanded(
+                                          child: Text(
+                                            "Prevent double-booking",
+                                            style: TextStyle(
+                                              fontWeight: FontWeight.w600,
+                                              fontSize: 15,
+                                            ),
+                                          ),
+                                        ),
+                                        GestureDetector(
+                                          onTap: _showInfoSheet,
+                                          child: const Icon(
+                                            Icons.info_outline_rounded,
+                                            size: 18,
+                                            color: KLPalette.text2,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 6),
+                                    const Text(
+                                      "Automatically lock booked time slots.",
+                                      style: TextStyle(
+                                        color: KLPalette.text2,
+                                        fontSize: 13,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              Switch(
+                                value: _autoLockTimeSlots,
+                                onChanged: (v) =>
+                                    setState(() => _autoLockTimeSlots = v),
+                              ),
+                            ],
+                          ),
+                        ),
+
                           const SizedBox(height: 12),
 
                           Row(
@@ -670,6 +730,48 @@ class _ProviderServiceFormScreenState extends State<ProviderServiceFormScreen> {
           ),
         ),
       ),
+    );
+  }
+
+  void _showInfoSheet() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: KLPalette.bg,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+      ),
+      builder: (_) {
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 28),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: const [
+              Text(
+                "Auto lock time slots",
+                style: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 18,
+                ),
+              ),
+              SizedBox(height: 12),
+              Text(
+                "When enabled, booked time slots are automatically blocked from new bookings.\n\n"
+                    "This helps:\n"
+                    "• Prevent scheduling conflicts\n"
+                    "• Reduce cancellations\n"
+                    "• Create a clearer customer experience\n\n"
+                    "Turn this off only if you can handle multiple bookings at the same time.",
+                style: TextStyle(
+                  fontSize: 14,
+                  height: 1.45,
+                  color: KLPalette.text,
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 

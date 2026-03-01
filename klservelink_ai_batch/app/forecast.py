@@ -4,12 +4,17 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Dict, Iterable, List, Optional
 
+import logging
+
 import pandas as pd
 from zoneinfo import ZoneInfo
+
+from app.arima_baseline import arima_forecast_hourly
 
 TZ_LOCAL = ZoneInfo("Asia/Kuala_Lumpur")
 TZ_UTC = ZoneInfo("UTC")
 
+logger = logging.getLogger(__name__)
 
 def _to_datetime(ts: Any) -> Optional[datetime]:
     if ts is None:
@@ -116,6 +121,7 @@ def build_opportunity_index(
     service_id_to_category: Optional[Dict[str, str]] = None,
     view_events: Optional[Iterable[Any]] = None,
     use_views_regressor: bool = True,
+    algo: str = "prophet",
 ) -> OpportunityResult:
     """
     Production forecaster (Prophet primary). Forecasts hourly booking demand and scores
@@ -126,6 +132,11 @@ def build_opportunity_index(
     now_utc = datetime.now(tz=TZ_UTC)
     start_utc = now_utc - timedelta(days=window_days)
     end_utc = now_utc
+
+    algo_req = (algo or "prophet").lower().strip()
+    algo_used = "heuristic"  # default if everything fails
+
+    yhat_df: Optional[pd.DataFrame] = None
 
     # Collect booking hours (LOCAL naive) + realized prices
     hour_rows_local_naive: List[datetime] = []
@@ -225,151 +236,84 @@ def build_opportunity_index(
 
     future: Optional[pd.DataFrame] = None
 
-    # --- Prophet primary ---
-    try:
-        from prophet import Prophet
+    if algo_req == "heuristic":
+        try:
+            raise RuntimeError("force_heuristic")
+        except Exception as e:
+            # --- Heuristic fallback: hour-of-week historical mean ---
+            df2 = df.copy()
+            df2["weekday"] = df2["ds"].dt.weekday  # Mon=0
+            df2["hour"] = df2["ds"].dt.hour
 
-        m = Prophet(
-            weekly_seasonality=True,
-            daily_seasonality=True,
-            seasonality_mode="additive",
-        )
+            grp = df2.groupby(["weekday", "hour"])["y"].mean().reset_index()
+            maxy = grp["y"].max() if grp["y"].max() > 0 else 1.0
+            grp["score_raw"] = (grp["y"] / maxy) * 100.0
 
-        if views_used:
-            m.add_regressor("views", standardize=False)
+            top = grp.sort_values("score_raw", ascending=False).head(top_k)
 
-        # debug
-        print("FIT columns:", df.columns.tolist(), "views_used:", views_used)
+            slots: List[Dict[str, Any]] = []
+            # Map each (weekday,hour) to its next occurrence in LOCAL time, then store UTC
+            now_local = datetime.now(tz=TZ_LOCAL).replace(minute=0, second=0, microsecond=0)
+            for _, r in top.iterrows():
+                target_wd = int(r["weekday"])  # 0..6
+                target_h = int(r["hour"])
 
-        m.fit(df)
+                probe = now_local
+                for _ in range(24 * 14):
+                    if probe.weekday() == target_wd and probe.hour == target_h and probe > now_local:
+                        slots.append(
+                            {
+                                "startAt": probe.astimezone(TZ_UTC),
+                                "score": float(r["score_raw"]),
+                                "expectedBookings": float(r["y"]),
+                                "expectedRevenue": float(r["y"] * avg_price),
+                            }
+                        )
+                        break
+                    probe += timedelta(hours=1)
 
-        # debug
-        if views_used:
-            print("Regressor coef (views):", float(m.params["beta"][0][0]))
+            return OpportunityResult(
+                slots=slots,
+                algo_used="heuristic",
+                meta={"reason": "heuristic_requested", "error": str(e)[:200], "viewsUsed": views_used},
+                categories=[],
+            )
 
-        # Find coefficient for the 'views' feature in the design matrix
-        feat_names = m.train_component_cols.index.tolist()
-        if "views" in feat_names:
-            i = feat_names.index("views")
-            views_coef = float(m.params["beta"][0, i])
-            print("Views coef (proper):", views_coef)
-        else:
-            print("Views not found in feature names:", feat_names[:30], "...")
+    # --- ARIMA/SARIMAX  ---
+    if algo_req in ("arima", "sarimax"):
+        try:
+            yhat_df = arima_forecast_hourly(
+                df[["ds", "y"]],
+                horizon_hours=horizon_days * 24,
+            )
+            # sanitize
+            yhat_df = yhat_df[["ds", "yhat"]].copy()
+            yhat_df["ds"] = pd.to_datetime(yhat_df["ds"])
+            yhat_df["yhat"] = pd.to_numeric(yhat_df["yhat"], errors="coerce").fillna(0.0).clip(lower=0.0)
+            algo_used = "arima"
+        except Exception as e:
+            logger.exception("ARIMA failed; fallback heuristic: %s", e)
+            yhat_df = None
 
-
-        future = m.make_future_dataframe(periods=horizon_days * 24, freq="H")
-
-        if views_used:
-            try:
-                if (views_df is None) or views_df.empty or ("views" not in views_df.columns):
-                    future["views"] = 0.0
-                else:
-                    mean_tbl = _hour_of_week_mean(views_df, "views")
-                    fallback = float(views_df["views"].mean()) if len(views_df) else 0.0
-                    future["views"] = _fill_future_by_hour_of_week_mean(future, mean_tbl, fallback)
-
-                    # overwrite historical with actual views where available
-                    future = future.merge(views_df[["ds", "views"]], on="ds", how="left", suffixes=("", "_actual"))
-                    future["views"] = future["views_actual"].fillna(future["views"]).astype(float)
-                    future = future.drop(columns=["views_actual"], errors="ignore")
-            except Exception:
-                future["views"] = 0.0
-        else:
-            views_used = False
-
-        # debug
-        print("PREDICT columns:", future.columns.tolist(), "views_used:", views_used)
-
-        fc = m.predict(future)
-
-        # debug
-        #future0 = future.copy()
-        #future0["views"] = 0.0
-        #fc0 = m.predict(future0)
-
-        #delta = (fc["yhat"] - fc0["yhat"]).describe()
-        #print("Effect of views on yhat (delta):", delta.to_dict())
-
-        cutoff = df["ds"].max()
-        future_fc = fc[fc["ds"] > cutoff].copy()
-
-        # Booking forecast
-        yhat = future_fc["yhat"].clip(lower=0.0)
-
-        # Expected profit proxy
+    if yhat_df is not None and algo_used == "arima":
+        yhat = yhat_df["yhat"].clip(lower=0.0)
         expected_revenue = yhat * avg_price
 
         if expected_revenue.max() <= 0:
-            return OpportunityResult(slots=[], algo_used="prophet", meta={"reason": "zero_forecast"}, categories=[])
+            return OpportunityResult(slots=[], algo_used="arima", meta={"reason": "zero_forecast"}, categories=[])
 
+        future_fc = yhat_df.copy()
         future_fc["expectedBookings"] = yhat
         future_fc["expectedRevenue"] = expected_revenue
         future_fc["score"] = (expected_revenue / expected_revenue.max()) * 100.0
-
-        # Attach future views + conversion rate
-        #if views_used:
-        #    if "views" not in future_fc.columns:
-        #        v_future = future[future["ds"] > cutoff][["ds", "views"]].copy()
-        #        future_fc = future_fc.merge(v_future, on="ds", how="left", suffixes=("", "_future"))
-#
-        #        # If merge produced views_future, normalize back to 'views'
-        #        if "views_future" in future_fc.columns and "views" not in future_fc.columns:
-        #            future_fc["views"] = future_fc["views_future"]
-        #    else:
-        #        future_fc["views"] = future_fc["views"].astype(float)
-        #        v_future_raw = future.loc[future["ds"] > cutoff, ["ds", "views"]].copy()
-        #        v_future_raw = v_future_raw.rename(columns={"views": "views_raw"})
-#
-        #    if "views" not in future_fc.columns:
-        #        if "views_x" in future_fc.columns:
-        #            future_fc["views"] = future_fc["views_x"]
-        #        elif "views_y" in future_fc.columns:
-        #            future_fc["views"] = future_fc["views_y"]
-#
-        #    future_fc["views"] = future_fc["views"].fillna(0.0).astype(float).clip(lower=0.0)
-         #   future_fc["expectedViews"] = future_fc["views"]
-#
-         #   # Add floor so denom isn't near zero
-        #    views_floor = 1.0
-#
-        #    denom = future_fc["expectedViews"] + views_floor
-        #    future_fc["expectedConversionRate"] = (
-        #        (future_fc["expectedBookings"] / denom).clip(lower=0.0, upper=1.0)
-        #    )
-        #else:
-        #    future_fc["expectedViews"] = None
-        #    future_fc["expectedConversionRate"] = None
-
-        # Attach future views (RAW) + conversion rate
-        if views_used:
-            v_future_raw = future.loc[future["ds"] > cutoff, ["ds", "views"]].copy()
-            v_future_raw = v_future_raw.rename(columns={"views": "views_raw"})
-
-            future_fc = future_fc.merge(v_future_raw, on="ds", how="left")
-
-            future_fc["expectedViews"] = future_fc["views_raw"].fillna(0.0).astype(float)
-
-            # clip to at least 1 view/hour
-            denom = future_fc["expectedViews"].where(future_fc["expectedViews"] > 0, 1.0)
-
-            future_fc["expectedConversionRate"] = (
-                (future_fc["expectedBookings"] / denom).clip(lower=0.0, upper=1.0)
-            )
-
-            # debug
-            print("RAW future views describe:", v_future_raw["views_raw"].describe().to_dict())
-            print("future_fc expectedViews describe:", future_fc["expectedViews"].describe().to_dict())
-
-        else:
-            future_fc["expectedViews"] = None
-            future_fc["expectedConversionRate"] = None
-
+        future_fc["expectedViews"] = None
+        future_fc["expectedConversionRate"] = None
 
         top = future_fc.sort_values("score", ascending=False).head(top_k)
 
         slots: List[Dict[str, Any]] = []
         for _, r in top.iterrows():
-            dt_local_naive: datetime = r["ds"].to_pydatetime()
+            dt_local_naive: datetime = pd.to_datetime(r["ds"]).to_pydatetime()
             dt_utc_out = _local_naive_to_utc(dt_local_naive)
             slots.append(
                 {
@@ -377,8 +321,8 @@ def build_opportunity_index(
                     "score": float(r["score"]),
                     "expectedBookings": float(r["expectedBookings"]),
                     "expectedRevenue": float(r["expectedRevenue"]),
-                    "expectedViews": None if r["expectedViews"] is None else float(r["expectedViews"]),
-                    "expectedConversionRate": None if r["expectedConversionRate"] is None else float(r["expectedConversionRate"]),
+                    "expectedViews": None,
+                    "expectedConversionRate": None,
                 }
             )
 
@@ -390,56 +334,239 @@ def build_opportunity_index(
             for cat, val in top_cat:
                 categories.append({"category": cat, "score": float(val / maxv * 100.0), "realizedRevenue": float(val)})
 
-
         return OpportunityResult(
             slots=slots,
-            algo_used="prophet_views" if views_used else "prophet",
+            algo_used="arima",
             meta={
                 "windowDays": window_days,
                 "horizonDays": horizon_days,
                 "points": int(len(df)),
                 "avgPrice": avg_price,
-                "viewsUsed": views_used,
+                "viewsUsed": False,
             },
             categories=categories,
         )
 
-    except Exception as e:
-        # --- Heuristic fallback: hour-of-week historical mean ---
-        df2 = df.copy()
-        df2["weekday"] = df2["ds"].dt.weekday  # Mon=0
-        df2["hour"] = df2["ds"].dt.hour
+    # --- Prophet primary ---
+    if yhat_df is None and algo_req == "prophet":
+        try:
+            from prophet import Prophet
 
-        grp = df2.groupby(["weekday", "hour"])["y"].mean().reset_index()
-        maxy = grp["y"].max() if grp["y"].max() > 0 else 1.0
-        grp["score_raw"] = (grp["y"] / maxy) * 100.0
+            m = Prophet(
+                weekly_seasonality=True,
+                daily_seasonality=True,
+                seasonality_mode="additive",
+            )
 
-        top = grp.sort_values("score_raw", ascending=False).head(top_k)
+            if views_used:
+                m.add_regressor("views", standardize=False)
 
-        slots: List[Dict[str, Any]] = []
-        # Map each (weekday,hour) to its next occurrence in LOCAL time, then store UTC
-        now_local = datetime.now(tz=TZ_LOCAL).replace(minute=0, second=0, microsecond=0)
-        for _, r in top.iterrows():
-            target_wd = int(r["weekday"])  # 0..6
-            target_h = int(r["hour"])
+            # debug
+            print("FIT columns:", df.columns.tolist(), "views_used:", views_used)
 
-            probe = now_local
-            for _ in range(24 * 14):
-                if probe.weekday() == target_wd and probe.hour == target_h and probe > now_local:
-                    slots.append(
-                        {
-                            "startAt": probe.astimezone(TZ_UTC),
-                            "score": float(r["score_raw"]),
-                            "expectedBookings": float(r["y"]),
-                            "expectedRevenue": float(r["y"] * avg_price),
-                        }
-                    )
-                    break
-                probe += timedelta(hours=1)
+            m.fit(df)
 
-        return OpportunityResult(
-            slots=slots,
-            algo_used="heuristic",
-            meta={"reason": "prophet_failed", "error": str(e)[:200], "viewsUsed": views_used},
-            categories=[],
-        )
+            # debug
+            if views_used:
+                print("Regressor coef (views):", float(m.params["beta"][0][0]))
+
+            # Find coefficient for the 'views' feature in the design matrix
+            feat_names = m.train_component_cols.index.tolist()
+            if "views" in feat_names:
+                i = feat_names.index("views")
+                views_coef = float(m.params["beta"][0, i])
+                print("Views coef (proper):", views_coef)
+            else:
+                print("Views not found in feature names:", feat_names[:30], "...")
+
+
+            future = m.make_future_dataframe(periods=horizon_days * 24, freq="H")
+
+            if views_used:
+                try:
+                    if (views_df is None) or views_df.empty or ("views" not in views_df.columns):
+                        future["views"] = 0.0
+                    else:
+                        mean_tbl = _hour_of_week_mean(views_df, "views")
+                        fallback = float(views_df["views"].mean()) if len(views_df) else 0.0
+                        future["views"] = _fill_future_by_hour_of_week_mean(future, mean_tbl, fallback)
+
+                        # overwrite historical with actual views where available
+                        future = future.merge(views_df[["ds", "views"]], on="ds", how="left", suffixes=("", "_actual"))
+                        future["views"] = future["views_actual"].fillna(future["views"]).astype(float)
+                        future = future.drop(columns=["views_actual"], errors="ignore")
+                except Exception:
+                    future["views"] = 0.0
+            else:
+                views_used = False
+
+            # debug
+            print("PREDICT columns:", future.columns.tolist(), "views_used:", views_used)
+
+            fc = m.predict(future)
+
+            # debug
+            #future0 = future.copy()
+            #future0["views"] = 0.0
+            #fc0 = m.predict(future0)
+
+            #delta = (fc["yhat"] - fc0["yhat"]).describe()
+            #print("Effect of views on yhat (delta):", delta.to_dict())
+
+            cutoff = df["ds"].max()
+            future_fc = fc[fc["ds"] > cutoff].copy()
+
+            # Booking forecast
+            yhat = future_fc["yhat"].clip(lower=0.0)
+
+            # Expected profit proxy
+            expected_revenue = yhat * avg_price
+
+            if expected_revenue.max() <= 0:
+                return OpportunityResult(slots=[], algo_used="prophet", meta={"reason": "zero_forecast"}, categories=[])
+
+            future_fc["expectedBookings"] = yhat
+            future_fc["expectedRevenue"] = expected_revenue
+            future_fc["score"] = (expected_revenue / expected_revenue.max()) * 100.0
+
+            # Attach future views (RAW) + conversion rate
+            if views_used:
+                v_future_raw = future.loc[future["ds"] > cutoff, ["ds", "views"]].copy()
+                v_future_raw = v_future_raw.rename(columns={"views": "views_raw"})
+
+                future_fc = future_fc.merge(v_future_raw, on="ds", how="left")
+
+                future_fc["expectedViews"] = future_fc["views_raw"].fillna(0.0).astype(float)
+
+                # clip to at least 1 view/hour
+                denom = future_fc["expectedViews"].where(future_fc["expectedViews"] > 0, 1.0)
+
+                future_fc["expectedConversionRate"] = (
+                    (future_fc["expectedBookings"] / denom).clip(lower=0.0, upper=1.0)
+                )
+
+                # debug
+                print("RAW future views describe:", v_future_raw["views_raw"].describe().to_dict())
+                print("future_fc expectedViews describe:", future_fc["expectedViews"].describe().to_dict())
+
+            else:
+                future_fc["expectedViews"] = None
+                future_fc["expectedConversionRate"] = None
+
+
+            top = future_fc.sort_values("score", ascending=False).head(top_k)
+
+            slots: List[Dict[str, Any]] = []
+            for _, r in top.iterrows():
+                dt_local_naive: datetime = r["ds"].to_pydatetime()
+                dt_utc_out = _local_naive_to_utc(dt_local_naive)
+                slots.append(
+                    {
+                        "startAt": dt_utc_out,
+                        "score": float(r["score"]),
+                        "expectedBookings": float(r["expectedBookings"]),
+                        "expectedRevenue": float(r["expectedRevenue"]),
+                        "expectedViews": None if r["expectedViews"] is None else float(r["expectedViews"]),
+                        "expectedConversionRate": None if r["expectedConversionRate"] is None else float(r["expectedConversionRate"]),
+                    }
+                )
+
+            # Categories: rank by realized revenue in window
+            categories: List[Dict[str, Any]] = []
+            if cat_revenue:
+                top_cat = sorted(cat_revenue.items(), key=lambda x: x[1], reverse=True)[:5]
+                maxv = top_cat[0][1] if top_cat else 1.0
+                for cat, val in top_cat:
+                    categories.append({"category": cat, "score": float(val / maxv * 100.0), "realizedRevenue": float(val)})
+
+
+            return OpportunityResult(
+                slots=slots,
+                algo_used="prophet_views" if views_used else "prophet",
+                meta={
+                    "windowDays": window_days,
+                    "horizonDays": horizon_days,
+                    "points": int(len(df)),
+                    "avgPrice": avg_price,
+                    "viewsUsed": views_used,
+                },
+                categories=categories,
+            )
+
+        except Exception as e:
+            # --- Heuristic fallback: hour-of-week historical mean ---
+            df2 = df.copy()
+            df2["weekday"] = df2["ds"].dt.weekday  # Mon=0
+            df2["hour"] = df2["ds"].dt.hour
+
+            grp = df2.groupby(["weekday", "hour"])["y"].mean().reset_index()
+            maxy = grp["y"].max() if grp["y"].max() > 0 else 1.0
+            grp["score_raw"] = (grp["y"] / maxy) * 100.0
+
+            top = grp.sort_values("score_raw", ascending=False).head(top_k)
+
+            slots: List[Dict[str, Any]] = []
+            # Map each (weekday,hour) to its next occurrence in LOCAL time, then store UTC
+            now_local = datetime.now(tz=TZ_LOCAL).replace(minute=0, second=0, microsecond=0)
+            for _, r in top.iterrows():
+                target_wd = int(r["weekday"])  # 0..6
+                target_h = int(r["hour"])
+
+                probe = now_local
+                for _ in range(24 * 14):
+                    if probe.weekday() == target_wd and probe.hour == target_h and probe > now_local:
+                        slots.append(
+                            {
+                                "startAt": probe.astimezone(TZ_UTC),
+                                "score": float(r["score_raw"]),
+                                "expectedBookings": float(r["y"]),
+                                "expectedRevenue": float(r["y"] * avg_price),
+                            }
+                        )
+                        break
+                    probe += timedelta(hours=1)
+
+            return OpportunityResult(
+                slots=slots,
+                algo_used="heuristic",
+                meta={"reason": "prophet_failed", "error": str(e)[:200], "viewsUsed": views_used},
+                categories=[],
+            )
+
+    # If algo_req was arima/sarimax but ARIMA failed, fall back to heuristic.
+    df2 = df.copy()
+    df2["weekday"] = df2["ds"].dt.weekday  # Mon=0
+    df2["hour"] = df2["ds"].dt.hour
+
+    grp = df2.groupby(["weekday", "hour"])["y"].mean().reset_index()
+    maxy = grp["y"].max() if grp["y"].max() > 0 else 1.0
+    grp["score_raw"] = (grp["y"] / maxy) * 100.0
+
+    top = grp.sort_values("score_raw", ascending=False).head(top_k)
+
+    slots: List[Dict[str, Any]] = []
+    now_local = datetime.now(tz=TZ_LOCAL).replace(minute=0, second=0, microsecond=0)
+    for _, r in top.iterrows():
+        target_wd = int(r["weekday"])  # 0..6
+        target_h = int(r["hour"])
+
+        probe = now_local
+        for _ in range(24 * 14):
+            if probe.weekday() == target_wd and probe.hour == target_h and probe > now_local:
+                slots.append(
+                    {
+                        "startAt": probe.astimezone(TZ_UTC),
+                        "score": float(r["score_raw"]),
+                        "expectedBookings": float(r["y"]),
+                        "expectedRevenue": float(r["y"] * avg_price),
+                    }
+                )
+                break
+            probe += timedelta(hours=1)
+
+    return OpportunityResult(
+        slots=slots,
+        algo_used="heuristic",
+        meta={"reason": "fallback_heuristic", "viewsUsed": views_used},
+        categories=[],
+    )

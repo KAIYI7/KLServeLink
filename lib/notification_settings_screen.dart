@@ -35,12 +35,26 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
       setState(() => _loading = false);
       return;
     }
+    final docRef = _db.collection('users').doc(uid);
     final snap = await _db.collection('users').doc(uid).get();
     final data = snap.data() ?? <String, dynamic>{};
     _role = (data['role'] ?? '').toString();
-    final prefs = (data['notificationPrefs'] is Map)
-        ? (data['notificationPrefs'] as Map).cast<String, dynamic>()
-        : <String, dynamic>{};
+
+    if (data['notificationPrefs'] is! Map) {
+      await docRef.set({
+        'notificationPrefs': {
+          'bookingUpdates': true,
+          'newBookingRequests': true,
+          'messages': true,
+          'promos': false,
+          'updatedAt': FieldValue.serverTimestamp(),
+        }
+      }, SetOptions(merge: true));
+    }
+
+    final freshSnap = await docRef.get();
+    final freshData = freshSnap.data() ?? <String, dynamic>{};
+    final prefs = (freshData['notificationPrefs'] as Map).cast<String, dynamic>();
 
     bookingUpdates = (prefs['bookingUpdates'] ?? true) == true;
     newBookingRequests = (prefs['newBookingRequests'] ?? true) == true;
@@ -53,12 +67,19 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
   Future<void> _setPref(String key, bool value) async {
     final uid = _auth.currentUser?.uid;
     if (uid == null) return;
-    await _db.collection('users').doc(uid).set({
-      'notificationPrefs': {
-        key: value,
-        'updatedAt': FieldValue.serverTimestamp(),
-      }
-    }, SetOptions(merge: true));
+
+    final docRef = _db.collection('users').doc(uid);
+    final snap = await docRef.get();
+    final data = snap.data() ?? {};
+
+    final prefs = (data['notificationPrefs'] is Map)
+        ? Map<String, dynamic>.from(data['notificationPrefs'])
+        : <String, dynamic>{};
+
+    prefs[key] = value;
+    prefs['updatedAt'] = FieldValue.serverTimestamp();
+
+    await docRef.set({'notificationPrefs': prefs}, SetOptions(merge: true));
   }
 
   @override
@@ -134,17 +155,17 @@ class _NotificationSettingsScreenState extends State<NotificationSettingsScreen>
                                   _setPref('messages', v);
                                 },
                               ),
-                              const SizedBox(height: 18),
-                              const Text('Other', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16)),
-                              const SizedBox(height: 8),
-                              _switch(
-                                'Promotions & announcements',
-                                promos,
-                                    (v) {
-                                  setState(() => promos = v);
-                                  _setPref('promos', v);
-                                },
-                              ),
+                              // const SizedBox(height: 18),
+                              // const Text('Other', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16)),
+                              // const SizedBox(height: 8),
+                              // _switch(
+                              //   'Promotions & announcements',
+                              //   promos,
+                              //       (v) {
+                              //     setState(() => promos = v);
+                              //     _setPref('promos', v);
+                              //   },
+                              // ),
                             ],
                         ],
                       ),

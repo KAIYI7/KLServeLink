@@ -40,6 +40,402 @@ import { onSchedule } from "firebase-functions/v2/scheduler";
 
 admin.initializeApp();
 
+const PAYMENT_TIMEOUT_MIN = 30;
+const PAYMENT_TIMEOUT_MS = PAYMENT_TIMEOUT_MIN * 60 * 1000;
+
+const KL_OFFSET_MS = 8 * 60 * 60 * 1000;
+const LOCK_STEP_MIN = 5;
+const LOCK_STEP_MS = LOCK_STEP_MIN * 60 * 1000;
+
+const PENDING_REMIND_BEFORE_HOURS = 24;
+const PENDING_AUTO_CANCEL_GRACE_MIN = 30;
+
+const COMPLETE_REMIND_AFTER_HOURS = 6;     // remind provider 6h after expected end
+const COMPLETE_AUTO_CANCEL_AFTER_DAYS = 3; // auto-cancel/refund after 3d
+
+function tsToMs(ts: any): number | null {
+  if (!ts) return null;
+  if (ts instanceof Date) return ts.getTime();
+  if (typeof ts.toDate === "function") return ts.toDate().getTime();
+  return null;
+}
+
+function addHoursMs(ms: number, h: number) {
+  return ms + h * 60 * 60 * 1000;
+}
+
+function addDaysMs(ms: number, d: number) {
+  return ms + d * 24 * 60 * 60 * 1000;
+}
+
+function bookingEndMs(b: any): number | null {
+  const startMs = tsToMs(b.scheduledAt);
+  if (!startMs) return null;
+
+  const hoursNum = Number(b.hours ?? 0);
+  if (!Number.isFinite(hoursNum) || hoursNum <= 0) return null;
+
+  const totalMinutes = Math.round(hoursNum * 60);
+  return startMs + totalMinutes * 60 * 1000;
+}
+
+function pad2(n: number) { return n.toString().padStart(2, "0"); }
+function pad4(n: number) { return n.toString().padStart(4, "0"); }
+
+// Convert an instant to “KL-local” parts by shifting +8h and reading UTC fields.
+function klPartsFromMs(ms: number) {
+  const d = new Date(ms + KL_OFFSET_MS);
+  return {
+    y: d.getUTCFullYear(),
+    m: d.getUTCMonth() + 1,
+    d: d.getUTCDate(),
+    hh: d.getUTCHours(),
+    mm: d.getUTCMinutes(),
+  };
+}
+
+function klDayKeyFromMs(ms: number) {
+  const p = klPartsFromMs(ms);
+  return `${p.y}${pad2(p.m)}${pad2(p.d)}`;
+}
+
+function klMinutesSinceMidnightFromMs(ms: number) {
+  const p = klPartsFromMs(ms);
+  return p.hh * 60 + p.mm; // 0..1439
+}
+
+function buildSlotLockRefs(providerId: string, startMs: number, endMs: number) {
+  const refs: FirebaseFirestore.DocumentReference[] = [];
+  for (let t = startMs; t < endMs; t += LOCK_STEP_MS) {
+    const dayKey = klDayKeyFromMs(t);
+    const slotMin = klMinutesSinceMidnightFromMs(t);
+    const slotId = pad4(slotMin); // "0000".."1439"
+    refs.push(
+      admin.firestore()
+        .collection("timeSlotLocks")
+        .doc(`${providerId}_${dayKey}`)
+        .collection("slots")
+        .doc(slotId)
+    );
+  }
+  return refs;
+}
+
+function overlaps(aStart: number, aEnd: number, bStart: number, bEnd: number) {
+  return aStart < bEnd && aEnd > bStart;
+}
+
+async function releaseLocksForBooking(bookingId: string, b: any) {
+  const providerId = String(b.providerId ?? "").trim();
+  if (!providerId) return;
+
+  const ts = b.scheduledAt;
+  const startMs = (ts && typeof ts.toDate === "function")
+    ? ts.toDate().getTime()
+    : (ts instanceof Date ? ts.getTime() : null);
+
+  if (!startMs) return;
+
+  const hoursNum = Number(b.hours ?? 0);
+  if (!Number.isFinite(hoursNum) || hoursNum <= 0) return;
+
+  const totalMinutes = Math.round(hoursNum * 60);
+  const endMs = startMs + totalMinutes * 60 * 1000;
+
+  const refs = buildSlotLockRefs(providerId, startMs, endMs);
+  if (refs.length === 0) return;
+
+  // Batch delete in chunks
+  const db = admin.firestore();
+  let i = 0;
+  while (i < refs.length) {
+    const batch = db.batch();
+    const slice = refs.slice(i, i + 450);
+    for (const r of slice) batch.delete(r);
+    await batch.commit();
+    i += slice.length;
+  }
+}
+
+function readPrefs(u: any): Record<string, any> {
+  const raw = u?.notificationPrefs;
+  return raw && typeof raw === "object" ? raw : {};
+}
+
+function prefBool(prefs: Record<string, any>, key: string, def = true): boolean {
+  const v = prefs[key];
+  return (v === undefined || v === null) ? def : v === true;
+}
+
+function isNotificationAllowedForUser(u: any, type: string): boolean {
+  const prefs = readPrefs(u);
+
+  const pushEnabled = prefBool(prefs, "pushEnabled", true);
+  if (!pushEnabled) return false;
+
+  const role = String(u?.role ?? "").toLowerCase();
+  const t = String(type ?? "").toLowerCase();
+
+  // Chat/messages
+  if (t.includes("chat") || t.includes("message")) {
+    return prefBool(prefs, "messages", prefBool(prefs, "chat", true));
+  }
+
+  // Reviews
+  if (t.includes("review")) {
+    return prefBool(prefs, "reviews", prefBool(prefs, "review", true));
+  }
+
+  // Bookings
+  if (t.includes("booking")) {
+    // Provider-only “new booking request”
+    if (t === "booking_created" || t.includes("booking_created")) {
+      if (role === "provider") {
+        return prefBool(prefs, "newBookingRequests", prefBool(prefs, "bookingUpdates", true));
+      }
+      return prefBool(prefs, "bookingUpdates", prefBool(prefs, "booking", true));
+    }
+
+    return prefBool(prefs, "bookingUpdates", prefBool(prefs, "booking", true));
+  }
+
+  return prefBool(prefs, "promos", true);
+}
+
+async function systemCancelBooking(opts: {
+  bookingRef: FirebaseFirestore.DocumentReference;
+  bookingId: string;
+  reason: string;
+  refund: boolean;
+}) {
+  const { bookingRef, bookingId, reason, refund } = opts;
+
+  let seekerId = "";
+  let providerId = "";
+
+  await admin.firestore().runTransaction(async (tx) => {
+    const snap = await tx.get(bookingRef);
+    if (!snap.exists) return;
+
+    const b = snap.data() as any;
+
+    const status = String(b.status ?? "").toLowerCase();
+    if (status === "cancelled" || status === "declined") return;
+
+    seekerId = String(b.seekerId ?? "").trim();
+    providerId = String(b.providerId ?? "").trim();
+
+    const p = (b.payment ?? {}) as any;
+    const method = String(p.method ?? b.paymentMethod ?? "").toLowerCase();
+    const state = String(p.state ?? "").toLowerCase();
+
+    const now = admin.firestore.FieldValue.serverTimestamp();
+
+    // default payment stays same unless refund requested + card is paid/authorized
+    let paymentUpdate: any = p;
+
+    if (refund && method === "card") {
+      if (state === "authorized" || state === "captured") {
+        paymentUpdate = {
+          ...p,
+          state: "refunded",
+          refundedAt: now,
+          refundReason: reason,
+          refundedBy: "system",
+        };
+      }
+    }
+
+    tx.set(
+      bookingRef,
+      {
+        status: "cancelled",
+        cancelReason: reason,
+        payment: paymentUpdate,
+        updatedAt: now,
+        cancelledAt: now,
+        cancelledBy: "system",
+      },
+      { merge: true }
+    );
+
+    tx.create(bookingRef.collection("history").doc(), {
+      at: now,
+      title: "Auto-cancelled",
+      subtitle: `System policy: ${reason}`,
+      actorUid: "system",
+    });
+  });
+
+  // Notify after transaction
+  if (seekerId) {
+    await pushInAppNotification({
+      toUid: seekerId,
+      title: "Booking auto-cancelled",
+      body: `Your booking was automatically cancelled (${reason}).`,
+      type: "booking_auto_cancelled",
+      data: { bookingId, reason },
+    });
+  }
+
+  if (providerId) {
+    await pushInAppNotification({
+      toUid: providerId,
+      title: "Booking auto-cancelled",
+      body: `A booking was automatically cancelled (${reason}).`,
+      type: "booking_auto_cancelled_provider",
+      data: { bookingId, reason },
+    });
+  }
+}
+
+export const remindPendingBookings1DayBefore = onSchedule(
+  { schedule: "every 60 minutes", timeZone: "Asia/Kuala_Lumpur" },
+  async () => {
+    const db = admin.firestore();
+    const now = Date.now();
+
+    const fromMs = addHoursMs(now, PENDING_REMIND_BEFORE_HOURS - 1);
+    const toMs   = addHoursMs(now, PENDING_REMIND_BEFORE_HOURS + 1);
+
+    const snap = await db
+      .collection("bookings")
+      .where("status", "==", "pending")
+      .where("scheduledAt", ">=", admin.firestore.Timestamp.fromMillis(fromMs))
+      .where("scheduledAt", "<=", admin.firestore.Timestamp.fromMillis(toMs))
+      .limit(200)
+      .get();
+
+    for (const doc of snap.docs) {
+      const b = doc.data() as any;
+      const bookingId = doc.id;
+
+      const providerId = String(b.providerId ?? "").trim();
+      if (!providerId) continue;
+
+      // Gate with a field to avoid repeated reminders
+      const already = b?.reminders?.pending1d === true;
+      if (already) continue;
+
+      await db.runTransaction(async (tx) => {
+        const s = await tx.get(doc.ref);
+        if (!s.exists) return;
+        const bb = s.data() as any;
+        if (String(bb.status ?? "") !== "pending") return;
+        if (bb?.reminders?.pending1d === true) return;
+
+        tx.set(doc.ref, { reminders: { ...(bb.reminders ?? {}), pending1d: true } }, { merge: true });
+      });
+
+      await pushInAppNotification({
+        toUid: providerId,
+        title: "Pending booking reminder",
+        body: "You have a pending booking scheduled within 24 hours. Please accept or decline.",
+        type: "booking_pending_reminder",
+        data: { bookingId },
+      });
+    }
+  }
+);
+
+export const autoCancelExpiredPendingBookings = onSchedule(
+  { schedule: "every 30 minutes", timeZone: "Asia/Kuala_Lumpur" },
+  async () => {
+    const db = admin.firestore();
+    const now = Date.now();
+    const cutoffMs = now - PENDING_AUTO_CANCEL_GRACE_MIN * 60 * 1000;
+
+    const snap = await db
+      .collection("bookings")
+      .where("status", "==", "pending")
+      .where("scheduledAt", "<", admin.firestore.Timestamp.fromMillis(cutoffMs))
+      .limit(200)
+      .get();
+
+    for (const doc of snap.docs) {
+      await systemCancelBooking({
+        bookingRef: doc.ref,
+        bookingId: doc.id,
+        reason: "provider_no_response",
+        refund: false,
+      });
+      // slot locks will be released through onBookingUpdated trigger
+    }
+  }
+);
+
+export const handleOverdueServiceCompletion = onSchedule(
+  { schedule: "every 6 hours", timeZone: "Asia/Kuala_Lumpur" },
+  async () => {
+    const db = admin.firestore();
+    const now = Date.now();
+
+    // Pull candidates in the last ~7 days
+    const lookbackMs = now - 7 * 24 * 60 * 60 * 1000;
+
+    const snap = await db
+      .collection("bookings")
+      .where("status", "in", ["accepted", "confirmed"])
+      .where("scheduledAt", ">=", admin.firestore.Timestamp.fromMillis(lookbackMs))
+      .where("scheduledAt", "<=", admin.firestore.Timestamp.fromMillis(now))
+      .limit(200)
+      .get();
+
+    for (const doc of snap.docs) {
+      const b = doc.data() as any;
+      const bookingId = doc.id;
+
+      const endMs = bookingEndMs(b);
+      if (!endMs) continue;
+
+      // reminder after end + X hours
+      const remindAt = addHoursMs(endMs, COMPLETE_REMIND_AFTER_HOURS);
+      const overdueForReminder = now >= remindAt;
+
+      const providerId = String(b.providerId ?? "").trim();
+      if (!providerId) continue;
+
+      if (overdueForReminder && b?.reminders?.completeSoon !== true) {
+        await db.runTransaction(async (tx) => {
+          const s = await tx.get(doc.ref);
+          if (!s.exists) return;
+          const bb = s.data() as any;
+          if (!["accepted", "confirmed"].includes(String(bb.status ?? ""))) return;
+          if (bb?.reminders?.completeSoon === true) return;
+
+          tx.set(doc.ref, { reminders: { ...(bb.reminders ?? {}), completeSoon: true } }, { merge: true });
+        });
+
+        await pushInAppNotification({
+          toUid: providerId,
+          title: "Reminder: update booking status",
+          body: "Your service time has passed. Please update the booking status to Completed (or cancel if not fulfilled).",
+          type: "booking_complete_reminder",
+          data: { bookingId },
+        });
+      }
+
+      // auto-cancel + refund after end + 3 days
+      const cancelAt = addDaysMs(endMs, COMPLETE_AUTO_CANCEL_AFTER_DAYS);
+      if (now >= cancelAt) {
+        // Refund only for card paid/authorized scenarios
+        const p = (b.payment ?? {}) as any;
+        const method = String(p.method ?? b.paymentMethod ?? "").toLowerCase();
+        const state = String(p.state ?? "").toLowerCase();
+
+        const refund = (method === "card") && (state === "authorized" || state === "captured");
+
+        await systemCancelBooking({
+          bookingRef: doc.ref,
+          bookingId,
+          reason: "no_completion_update",
+          refund,
+        });
+      }
+    }
+  }
+);
+
 async function trySendFcm(
   toUid: string,
   title: string,
@@ -52,26 +448,12 @@ async function trySendFcm(
   if (!userSnap.exists) return;
 
   const u = userSnap.data() || {};
+
+  if (!isNotificationAllowedForUser(u, type)) return;
+
   const token = (u.fcmToken ?? "").toString().trim();
   if (!token) return;
 
-  // Prefs gate (safe defaults = true)
-  const prefs =
-    u.notificationPrefs && typeof u.notificationPrefs === "object"
-      ? u.notificationPrefs
-      : {};
-  const pushEnabled = (prefs.pushEnabled ?? true) === true;
-
-  const cat =
-    type.includes("chat") ? "chat" :
-    type.includes("booking") ? "booking" :
-    type.includes("review") ? "review" :
-    "general";
-
-  const catEnabled = (prefs[cat] ?? true) === true;
-  if (!pushEnabled || !catEnabled) return;
-
-  // FCM data must be string:string
   const flat: Record<string, string> = {
     type: String(type),
     title: String(title),
@@ -119,24 +501,25 @@ async function pushInAppNotification(params: {
   data?: Record<string, any>;
 }) {
   const { toUid, title, body, type, data } = params;
-
   if (!toUid) return;
 
-  await admin
-    .firestore()
-    .collection("users")
-    .doc(toUid)
-    .collection("notifications")
-    .add({
-      title,
-      body,
-      type,
-      data: data ?? {},
-      read: false,
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
-    });
+  const userRef = admin.firestore().collection("users").doc(toUid);
+  const userSnap = await userRef.get();
+  if (!userSnap.exists) return;
 
-  // Try sending FCM push too (if token exists)
+  const u = userSnap.data() || {};
+
+  if (!isNotificationAllowedForUser(u, type)) return;
+
+  await userRef.collection("notifications").add({
+    title,
+    body,
+    type,
+    data: data ?? {},
+    read: false,
+    createdAt: admin.firestore.FieldValue.serverTimestamp(),
+  });
+
   await trySendFcm(toUid, title, body, type, data);
 }
 
@@ -214,6 +597,13 @@ export const createBookingVerified = onCall(async (req) => {
   if (status !== "active" || isDeleted) {
     throw new HttpsError("failed-precondition", "Service not active.");
   }
+
+  // Auto-lock setting (default true)
+  const autoLockTimeSlots = (svc["autoLockTimeSlots"] ?? true) === true;
+
+  // Booking window in ms
+  const startMs = scheduledAt.getTime();
+  const endMs = startMs + totalMinutes * 60 * 1000;
 
   // Compute floor price
   const price = Number(svc["price"] ?? 0);
@@ -312,6 +702,45 @@ export const createBookingVerified = onCall(async (req) => {
   const seekerId = auth.uid;
   const seekerName = String(req.auth?.token?.name ?? "Seeker");
 
+  // Overlap check against existing bookings
+  if (autoLockTimeSlots) {
+    const qSnap = await admin.firestore()
+      .collection("bookings")
+      .where("providerId", "==", providerId)
+      .where("status", "in", ["pending", "accepted", "confirmed", "completed"])
+      .where("scheduledAt", "<", admin.firestore.Timestamp.fromMillis(endMs))
+      .where(
+        "scheduledAt",
+        ">=",
+        admin.firestore.Timestamp.fromMillis(startMs - 24 * 60 * 60 * 1000)
+      )
+      .orderBy("scheduledAt", "asc")
+      .get();
+
+    for (const d of qSnap.docs) {
+      const m = d.data() as any;
+
+      const ts = m.scheduledAt;
+      const exStartMs =
+        (ts && typeof ts.toDate === "function") ? ts.toDate().getTime()
+        : (ts instanceof Date ? ts.getTime() : null);
+
+      if (!exStartMs) continue;
+
+      const exHours = Number(m.hours ?? 0);
+      if (!Number.isFinite(exHours) || exHours <= 0) continue;
+
+      const exEndMs = exStartMs + exHours * 60 * 60 * 1000;
+
+      if (overlaps(startMs, endMs, exStartMs, exEndMs)) {
+        throw new HttpsError(
+          "failed-precondition",
+          "Selected time is not available. Please choose another slot."
+        );
+      }
+    }
+  }
+
   const bookingRef = admin.firestore().collection("bookings").doc();
 
   const paymentMethodId = String(data.paymentMethodId ?? "cash");
@@ -336,61 +765,102 @@ export const createBookingVerified = onCall(async (req) => {
           payoutStatus: "none",
         };
 
-  await bookingRef.set({
-    providerId,
-    seekerId,
-    seekerName,
-    serviceId,
-    serviceName: String(svc["name"] ?? ""),
-    scheduledAt: admin.firestore.Timestamp.fromDate(scheduledAt),
-    status: "pending",
+  const lockRefs = autoLockTimeSlots
+    ? buildSlotLockRefs(providerId, startMs, endMs)
+    : [];
 
-    // location / address
-    addressId: String(data.addressId ?? ""),
-    locationText: String(data.locationText ?? ""),
-    locationArea: String(data.locationArea ?? ""),
-    locationLat: locLat,
-    locationLng: locLng,
-    locationGeohash: data.locationGeohash ?? null,
-    providerLat: typeof providerLat === "number" ? providerLat : null,
-    providerLng: typeof providerLng === "number" ? providerLng : null,
-    distanceKm: distanceKm,
+  try {
+    await admin.firestore().runTransaction(async (tx) => {
+      // Create slot locks first
+      // tx.create fails if any lock already exists.
+      if (autoLockTimeSlots) {
+        for (const ref of lockRefs) {
+          tx.create(ref, {
+            bookingId: bookingRef.id,
+            providerId,
+            serviceId,
+            seekerId,
+            startMs,
+            createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          });
+        }
+      }
 
-    paymentMethod: paymentMethodId,
-    payment,
+      // Create booking
+      tx.set(bookingRef, {
+        providerId,
+        seekerId,
+        seekerName,
+        serviceId,
+        serviceName: String(svc["name"] ?? ""),
+        scheduledAt: admin.firestore.Timestamp.fromDate(scheduledAt),
+        status: "pending",
 
-    // verified pricing
-    totalAmount: quote.total,
-    floorPrice: quote.baseFloor,
-    hourlyRate: quote.hourlyRate,
-    hours: quote.hours,
-    includedMinutes,
-    includedHours,
-    billableHours: (quote as any).billableHours ?? null,
-    rulesDelta: quote.rulesDelta,
-    pricingLines: quote.lines.map((l) => ({
-      ruleId: l.ruleId,
-      label: l.label,
-      amount: l.amount,
-      note: l.note ?? null,
-    })),
-    pricingRulesSnapshot: rulesRaw,
-    pricingVersion: 2,
-    pricingVerified: true,
+        // location / address
+        addressId: String(data.addressId ?? ""),
+        locationText: String(data.locationText ?? ""),
+        locationArea: String(data.locationArea ?? ""),
+        locationLat: locLat,
+        locationLng: locLng,
+        locationGeohash: data.locationGeohash ?? null,
+        providerLat: typeof providerLat === "number" ? providerLat : null,
+        providerLng: typeof providerLng === "number" ? providerLng : null,
+        distanceKm: distanceKm,
 
-    serviceRating: Number(svc["ratingAvg"] ?? svc["rating"] ?? 0),
-    isReviewed: false,
+        paymentMethod: paymentMethodId,
+        payment,
 
-    createdAt: admin.firestore.FieldValue.serverTimestamp(),
-    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-  });
+        // lock metadata
+        lockedSlots: autoLockTimeSlots,
+        lockStepMin: autoLockTimeSlots ? LOCK_STEP_MIN : null,
 
-  await bookingRef.collection("history").add({
-    at: admin.firestore.FieldValue.serverTimestamp(),
-    title: "New Booking",
-    subtitle: "Created by seeker (verified)",
-    actorUid: seekerId,
-  });
+        // verified pricing
+        totalAmount: quote.total,
+        floorPrice: quote.baseFloor,
+        hourlyRate: quote.hourlyRate,
+        hours: quote.hours,
+        includedMinutes,
+        includedHours,
+        billableHours: (quote as any).billableHours ?? null,
+        rulesDelta: quote.rulesDelta,
+        pricingLines: quote.lines.map((l) => ({
+          ruleId: l.ruleId,
+          label: l.label,
+          amount: l.amount,
+          note: l.note ?? null,
+        })),
+        pricingRulesSnapshot: rulesRaw,
+        pricingVersion: 2,
+        pricingVerified: true,
+
+        serviceRating: Number(svc["ratingAvg"] ?? svc["rating"] ?? 0),
+        isReviewed: false,
+
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      // History
+      tx.create(bookingRef.collection("history").doc(), {
+        at: admin.firestore.FieldValue.serverTimestamp(),
+        title: "New Booking",
+        subtitle: "Created by seeker",
+        actorUid: seekerId,
+      });
+    });
+  } catch (e: any) {
+    // If any lock doc already existed, tx.create will fail.
+    const code = e?.code;
+
+    // Firestore ALREADY_EXISTS can show up as numeric gRPC 6 or string forms
+    if (code === 6 || code === "already-exists" || code === "ALREADY_EXISTS") {
+      throw new HttpsError(
+        "failed-precondition",
+        "Selected time is no longer available. Please choose another slot."
+      );
+    }
+    throw e;
+  }
 
   return {
     bookingId: bookingRef.id,
@@ -679,7 +1149,13 @@ export const sweepUnpaidAcceptedBookings = onSchedule(
 
     const batch = admin.firestore().batch();
 
+    const notifySeekerIds: { uid: string; bookingId: string }[] = [];
+
     q.docs.forEach((doc) => {
+      const b = doc.data() as any;
+      const seekerId = String(b.seekerId ?? "").trim();
+      if (seekerId) notifySeekerIds.push({ uid: seekerId, bookingId: doc.id });
+
       batch.set(
         doc.ref,
         {
@@ -701,6 +1177,16 @@ export const sweepUnpaidAcceptedBookings = onSchedule(
     });
 
     await batch.commit();
+
+    for (const n of notifySeekerIds) {
+      await pushInAppNotification({
+        toUid: n.uid,
+        title: "Booking cancelled",
+        body: "Your booking was automatically cancelled because payment was not completed within 30 minutes.",
+        type: "booking_auto_cancelled",
+        data: { bookingId: n.bookingId, reason: "payment_timeout" },
+      });
+    }
   }
 );
 
@@ -733,6 +1219,14 @@ export const onBookingUpdated = onDocumentUpdated("bookings/{bookingId}", async 
   const afterStatus = (after.status ?? "").toString();
   if (beforeStatus === afterStatus) return;
 
+  // Release locked slots if booking was cancelled/declined
+  if (
+    (afterStatus === "cancelled" || afterStatus === "declined") &&
+    (beforeStatus !== "cancelled" && beforeStatus !== "declined")
+  ) {
+    await releaseLocksForBooking(event.params.bookingId, after);
+  }
+
   const seekerId = after.seekerId;
   const providerId = after.providerId;
 
@@ -755,6 +1249,45 @@ export const onBookingUpdated = onDocumentUpdated("bookings/{bookingId}", async 
       data: { bookingId: event.params.bookingId },
     });
   }
+
+  // If booking just got accepted, remind seeker to pay (card + unpaid only)
+  if (afterStatus === "accepted" && beforeStatus !== "accepted") {
+    const seekerId = String(after.seekerId ?? "").trim();
+    if (seekerId) {
+      const p = (after.payment ?? {}) as any;
+      const method = String(p.method ?? after.paymentMethod ?? "").toLowerCase();
+      const state = String(p.state ?? "").toLowerCase();
+
+      // Only warn for card bookings that are still unpaid
+      if (method === "card" && state === "unpaid") {
+        // Compute deadline text from acceptedAt if present
+        const acceptedAtTs = after.acceptedAt;
+        const acceptedAtMs =
+          (acceptedAtTs && typeof acceptedAtTs.toDate === "function")
+            ? acceptedAtTs.toDate().getTime()
+            : null;
+
+        const deadlineMs = acceptedAtMs ? (acceptedAtMs + PAYMENT_TIMEOUT_MS) : null;
+
+        const body =
+          deadlineMs
+            ? `Please complete your payment within ${PAYMENT_TIMEOUT_MIN} minutes to avoid automatic cancellation.`
+            : `Please complete your payment within ${PAYMENT_TIMEOUT_MIN} minutes to avoid automatic cancellation.`;
+
+        await pushInAppNotification({
+          toUid: seekerId,
+          title: "Payment required",
+          body,
+          type: "booking_payment_deadline",
+          data: {
+            bookingId: event.params.bookingId,
+            minutes: PAYMENT_TIMEOUT_MIN,
+          },
+        });
+      }
+    }
+  }
+
 });
 
 export const onMessageCreated = onDocumentCreated(

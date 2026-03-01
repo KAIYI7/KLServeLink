@@ -8,6 +8,7 @@ class SeekerServiceUi {
   final String address;
   final String type;
   final String status;
+  final bool autoLockTimeSlots;
   final List<String> photoUrls;
   final String? thumbnailUrl;
   final double price;
@@ -37,6 +38,7 @@ class SeekerServiceUi {
     required this.address,
     required this.type,
     required this.status,
+    this.autoLockTimeSlots = true,
     this.photoUrls = const [],
     this.thumbnailUrl,
     required this.price,
@@ -99,6 +101,7 @@ class SeekerServiceUi {
       address: (d["address"] ?? "") as String,
       type: (d["type"] ?? "onsite") as String,
       status: (d["status"] ?? "active") as String,
+      autoLockTimeSlots: (d['autoLockTimeSlots'] ?? true) == true,
       photoUrls: photoUrls,
       thumbnailUrl: thumbnailUrl,
       price: (d["price"] is num) ? (d["price"] as num).toDouble() : 0,

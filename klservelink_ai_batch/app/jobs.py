@@ -89,11 +89,13 @@ def run_recommendations() -> Dict:
             "views_used": len(views),
         }
 
-def run_forecast(window_days: int = 28, horizon_days: int = 7) -> Dict:
+def run_forecast(window_days: int = 28, horizon_days: int = 7, algo: str = "prophet") -> Dict:
     db = get_db()
 
     now_utc = datetime.now(tz=TZ_UTC)
     cutoff = now_utc - timedelta(days=window_days)
+
+    algo_req = (algo or "prophet").lower().strip()
 
     # Providers
     users = list(db.collection("users").stream())
@@ -123,8 +125,8 @@ def run_forecast(window_days: int = 28, horizon_days: int = 7) -> Dict:
 
     views_recent = list(
         db.collection("service_view_events")
-          .where("viewedAt", ">=", cutoff)
-          .stream()
+        .where("viewedAt", ">=", cutoff)
+        .stream()
     )
 
     views_by_provider: Dict[str, List] = {}
@@ -151,30 +153,54 @@ def run_forecast(window_days: int = 28, horizon_days: int = 7) -> Dict:
     batch = db.batch()
 
     for pid in provider_ids:
-        slots_payload = build_opportunity_index(
+        result = build_opportunity_index(
             provider_id=pid,
             bookings=by_provider.get(pid, []),
             horizon_days=horizon_days,
             window_days=window_days,
+            min_points=48,
+            top_k=12,
             service_id_to_category=sid_to_cat,
             view_events=views_by_provider.get(pid, []),
             use_views_regressor=True,
+            algo=algo_req,
         )
 
-        ref = db.collection("users").document(pid)
-        batch.set(
-            ref,
+        # Normalize slot payload
+        slots_payload = [
             {
-                "opportunity_index": {
-                    "slots": slots_payload.slots,
-                    "categories": slots_payload.categories,
-                    "meta": slots_payload.meta,
-                    "algo": slots_payload.algo_used,
-                    "updatedAt": firestore.SERVER_TIMESTAMP,
-                }
-            },
-            merge=True,
-        )
+                "startAt": slot.get("startAt"),
+                "score": slot.get("score"),
+                "expectedBookings": slot.get("expectedBookings"),
+                "expectedRevenue": slot.get("expectedRevenue"),
+                "expectedViews": slot.get("expectedViews"),
+                "expectedConversionRate": slot.get("expectedConversionRate"),
+                "category": slot.get("category"),
+            }
+            for slot in (result.slots or [])
+        ]
+
+        payload = {
+            "algo": result.algo_used,
+            "slots": slots_payload,
+            "categories": result.categories,
+            "meta": result.meta,
+            "updatedAt": firestore.SERVER_TIMESTAMP,
+        }
+
+        ref = db.collection("users").document(pid)
+
+        # Write to production path only for Prophet "main" run
+        if algo_req in ("prophet", "auto") and result.algo_used in ("prophet", "prophet_views"):
+            batch.set(ref, {"opportunity_index": payload}, merge=True)
+        else:
+            # Baseline path
+            batch.set(
+                ref,
+                {"opportunity_index_baselines": {algo_req: payload}},
+                merge=True,
+            )
+
         written += 1
 
     batch.commit()
@@ -183,6 +209,7 @@ def run_forecast(window_days: int = 28, horizon_days: int = 7) -> Dict:
         "bookings_used": len(bookings_recent),
         "window_days": window_days,
         "horizon_days": horizon_days,
+        "algo_requested": algo_req,
     }
 
 def run_reviews() -> Dict:

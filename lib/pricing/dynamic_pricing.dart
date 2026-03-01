@@ -55,8 +55,29 @@ PricingQuote evaluatePricing({
   final extraMinutes = (ctx.minutes - includedMinutes).clamp(0, 1 << 30);
   final extraHours = extraMinutes / 60.0;
 
-  final base = floorPrice + packagePrice + (extraHours * hourlyRate);
+  final baseBeforeDiscount = floorPrice + packagePrice + (extraHours * hourlyRate);
   final lines = <PricingLine>[];
+
+  final discountAmount = discountPercent > 0
+      ? -(baseBeforeDiscount * (discountPercent / 100.0))
+      : 0.0;
+
+  final baseAfterDiscount = baseBeforeDiscount + discountAmount;
+
+  if (discountAmount.abs() > 0.0001) {
+    lines.add(const PricingLine(
+      label: "Service discount",
+      amount: 0, // placeholder, replaced below
+      ruleId: "__BASE_DISCOUNT__",
+    ));
+    // Replace the last line with correct amount (Dart const limitation workaround)
+    lines.removeLast();
+    lines.add(PricingLine(
+      label: "Service discount",
+      amount: discountAmount,
+      ruleId: "__BASE_DISCOUNT__",
+    ));
+  }
 
   // caps
   double _capNum(String k, double fallback) =>
@@ -177,17 +198,7 @@ PricingQuote evaluatePricing({
     return v.clamp(-maxDiscountFixed, 0.0).toDouble();
   }
 
-  // insert synthetic discount rule for package discount
   final allRules = <Map<String, dynamic>>[
-    if (discountPercent > 0)
-      {
-        "id": "__BASE_DISCOUNT__",
-        "label": "Service discount",
-        "type": "percent",
-        "value": -discountPercent,
-        "priority": 100000,
-        "when": {},
-      },
     ...rules,
   ];
 
@@ -220,7 +231,7 @@ PricingQuote evaluatePricing({
     String? note;
     if (type == "percent") {
       final capped = clampPercent(value);
-      amt = base * (capped / 100.0);
+      amt = baseAfterDiscount * (capped / 100.0);
 
       if ((capped - value).abs() > 0.0001) {
         note =
@@ -246,7 +257,7 @@ PricingQuote evaluatePricing({
     }
   }
 
-  final rawTotal = base + delta;
+  final rawTotal = baseAfterDiscount + delta;
   final total = rawTotal.clamp(minTotal, maxTotal).toDouble();
 
   if ((total - rawTotal).abs() > 0.0001) {

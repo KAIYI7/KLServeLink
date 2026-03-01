@@ -1,6 +1,7 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
-from app.jobs import run_recommendations, run_forecast, run_reviews
+from app import jobs
+from app.jobs import run_recommendations, run_reviews
 
 app = FastAPI(title="KLServeLink AI Batch Jobs")
 
@@ -19,8 +20,10 @@ def run_rec():
     return RunResponse(ok=True, detail="recommendations updated", stats=stats)
 
 @app.post("/run/forecast", response_model=RunResponse)
-def run_fc():
-    stats = run_forecast()
+def run_fc(
+        algo: str = Query("prophet", pattern="^(prophet|arima|sarimax|auto)$"),
+):
+    stats = jobs.run_forecast(algo=algo)
     return RunResponse(ok=True, detail="opportunity_index updated", stats=stats)
 
 @app.post("/run/reviews", response_model=RunResponse)
@@ -31,6 +34,6 @@ def run_rv():
 @app.post("/run/all", response_model=RunResponse)
 def run_all():
     a = run_recommendations()
-    b = run_forecast()
+    b = jobs.run_forecast(algo="prophet")
     c = run_reviews()
     return RunResponse(ok=True, detail="all jobs completed", stats={"recommendations": a, "forecast": b, "reviews": c})

@@ -18,6 +18,7 @@ class ProviderServiceUi {
   final String address;
   final ServiceType type;
   final ServiceStatus status;
+  final bool autoLockTimeSlots;
 
   final List<String> photoUrls;
   final String? thumbnailUrl;
@@ -52,6 +53,7 @@ class ProviderServiceUi {
     required this.address,
     required this.type,
     required this.status,
+    this.autoLockTimeSlots = true,
     this.photoUrls = const [],
     this.thumbnailUrl,
     required this.price,
@@ -82,6 +84,7 @@ class ProviderServiceUi {
     String? address,
     ServiceType? type,
     ServiceStatus? status,
+    bool? autoLockTimeSlots,
     List<String>? photoUrls,
     String? thumbnailUrl,
     double? price,
@@ -111,6 +114,7 @@ class ProviderServiceUi {
       address: address ?? this.address,
       type: type ?? this.type,
       status: status ?? this.status,
+      autoLockTimeSlots: autoLockTimeSlots ?? this.autoLockTimeSlots,
       photoUrls: photoUrls ?? this.photoUrls,
       thumbnailUrl: thumbnailUrl ?? this.thumbnailUrl,
       price: price ?? this.price,
@@ -142,6 +146,7 @@ class ProviderServiceUi {
       "address": address,
       "type": type.name,
       "status": status.name,
+      "autoLockTimeSlots": autoLockTimeSlots,
       "photoUrls": photoUrls,
       "thumbnailUrl": thumbnailUrl,
       "price": price,
@@ -210,6 +215,7 @@ class ProviderServiceUi {
       address: (d["address"] ?? "") as String,
       type: parseType(d["type"] as String?),
       status: parseStatus(d["status"] as String?),
+      autoLockTimeSlots: (d["autoLockTimeSlots"] ?? true) == true,
       photoUrls: photoUrls,
       thumbnailUrl: thumbnailUrl,
       price: (d["price"] is num) ? (d["price"] as num).toDouble() : 0,
@@ -304,6 +310,7 @@ class ProviderServicesRepo {
       "address": data.address,
       "type": data.type.name,
       "status": data.status.name,
+      "autoLockTimeSlots": data.autoLockTimeSlots,
       "photoUrls": data.photoUrls,
       "thumbnailUrl": data.thumbnailUrl,
       "price": data.price,

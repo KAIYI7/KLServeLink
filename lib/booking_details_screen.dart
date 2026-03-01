@@ -113,6 +113,73 @@ class _BookingDetailsScreenState extends State<BookingDetailsScreen> {
     return DateTime(y, mm);
   }
 
+  bool _loadingBooked = false;
+  List<_BookedRange> _booked = [];
+
+  bool _overlaps(DateTime aStart, DateTime aEnd, DateTime bStart, DateTime bEnd) {
+    return aStart.isBefore(bEnd) && bStart.isBefore(aEnd);
+  }
+
+  bool _isSlotBlocked(DateTime slotStart) {
+    final slotEnd = slotStart.add(Duration(minutes: totalSelectedMinutes));
+    for (final r in _booked) {
+      if (_overlaps(slotStart, slotEnd, r.start, r.end)) return true;
+    }
+    return false;
+  }
+
+  Future<void> _fetchBookedForSelectedDate() async {
+    // If provider disabled locking, do nothing
+    if (!(widget.service.autoLockTimeSlots)) {
+      if (!mounted) return;
+      setState(() {
+        _booked = [];
+        _loadingBooked = false;
+      });
+      return;
+    }
+
+    setState(() => _loadingBooked = true);
+
+    final dayStart = DateTime(selectedDate.year, selectedDate.month, selectedDate.day);
+    final dayEnd = dayStart.add(const Duration(days: 1));
+
+    final snap = await FirebaseFirestore.instance
+        .collection('bookings')
+        .where('providerId', isEqualTo: widget.service.providerId)
+        .where('scheduledAt', isGreaterThanOrEqualTo: Timestamp.fromDate(dayStart))
+        .where('scheduledAt', isLessThan: Timestamp.fromDate(dayEnd))
+        .get();
+
+    final out = <_BookedRange>[];
+
+    for (final d in snap.docs) {
+      final m = d.data();
+      final status = (m['status'] ?? '').toString().toLowerCase();
+
+      // ignore cancelled/declined
+      if (status == 'cancelled' || status == 'declined') continue;
+
+      final ts = m['scheduledAt'];
+      if (ts is! Timestamp) continue;
+
+      final start = ts.toDate();
+
+      // booking duration stored as hours (double)
+      final hRaw = m['hours'];
+      final hoursBooked = (hRaw is num) ? hRaw.toDouble() : 1.0;
+
+      final end = start.add(Duration(minutes: (hoursBooked * 60).round()));
+      out.add(_BookedRange(start, end));
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _booked = out;
+      _loadingBooked = false;
+    });
+  }
+
   @override
   void initState() {
     super.initState();
@@ -164,6 +231,7 @@ class _BookingDetailsScreenState extends State<BookingDetailsScreen> {
                   _providerWHLoaded = true;
                   _rebuildSlotsForSelectedDate();
                 });
+                _fetchBookedForSelectedDate();
               });
             }
           }
@@ -251,12 +319,13 @@ class _BookingDetailsScreenState extends State<BookingDetailsScreen> {
                                 _visibleMonth = _addMonths(_visibleMonth, 1);
                               });
                             },
-                            onSelect: (d) {
+                            onSelect: (d) async {
                               setState(() {
                                 selectedDate = d;
                                 _visibleMonth = DateTime(d.year, d.month);
                                 _rebuildSlotsForSelectedDate();
                               });
+                              await _fetchBookedForSelectedDate();
                             },
                           ),
                         ),
@@ -333,6 +402,14 @@ class _BookingDetailsScreenState extends State<BookingDetailsScreen> {
                           const SliverToBoxAdapter(child: SizedBox(height: 12)),
                         ],
 
+                        if (_loadingBooked)
+                          const SliverToBoxAdapter(
+                            child: Padding(
+                              padding: EdgeInsets.only(bottom: 12),
+                              child: LinearProgressIndicator(minHeight: 3),
+                            ),
+                          ),
+
                         if (timeSlots.isNotEmpty)
                           SliverToBoxAdapter(
                             child: Wrap(
@@ -340,10 +417,16 @@ class _BookingDetailsScreenState extends State<BookingDetailsScreen> {
                               runSpacing: 12,
                               children: List.generate(timeSlots.length, (i) {
                                 final selected = i == selectedTimeIndex;
+                                final slotStartDt = combineDateAndSlot(selectedDate, timeSlots[i]);
+                                final blocked = widget.service.autoLockTimeSlots && _isSlotBlocked(slotStartDt);
+
                                 return _TimeChip(
                                   label: timeSlots[i],
-                                  selected: selected,
-                                  onTap: () {
+                                  selected: selected && !blocked,
+                                  enabled: !blocked,
+                                  onTap: blocked
+                                      ? null
+                                      : () {
                                     setState(() {
                                       selectedTimeIndex = i;
                                       _rebuildSlotsForSelectedDate();
@@ -833,9 +916,32 @@ class _BookingDetailsScreenState extends State<BookingDetailsScreen> {
       hours = newHours.clamp(1, 24);
       minutes = (newMinutes ~/ 5) * 5;
     }
+
+    _ensureSelectedSlotNotBlocked();
   }
 
+  void _ensureSelectedSlotNotBlocked() {
+    if (!widget.service.autoLockTimeSlots) return;
+    if (timeSlots.isEmpty) return;
 
+    final slotStart = combineDateAndSlot(selectedDate, timeSlots[selectedTimeIndex]);
+    if (!_isSlotBlocked(slotStart)) return;
+
+    // find first unblocked slot
+    for (int i = 0; i < timeSlots.length; i++) {
+      final s = combineDateAndSlot(selectedDate, timeSlots[i]);
+      if (!_isSlotBlocked(s)) {
+        selectedTimeIndex = i;
+        _rebuildSlotsForSelectedDate();
+        return;
+      }
+    }
+
+    // if all blocked, clear list (or show message)
+    timeSlots = [];
+    selectedTimeIndex = 0;
+    _scheduleError = "No available time slots for the selected duration.";
+  }
 }
 
 class _BookingRuleCard extends StatelessWidget {
@@ -1364,31 +1470,38 @@ class _RoundIcon extends StatelessWidget {
 class _TimeChip extends StatelessWidget {
   final String label;
   final bool selected;
-  final VoidCallback onTap;
+  final bool enabled;
+  final VoidCallback? onTap;
 
   const _TimeChip({
     required this.label,
     required this.selected,
+    required this.enabled,
     required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(999),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-        decoration: BoxDecoration(
-          color: selected ? KLPalette.primary : KLPalette.bg,
-          borderRadius: BorderRadius.circular(999),
-          border: Border.all(color: KLPalette.border),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            fontWeight: FontWeight.w900,
-            color: selected ? Colors.white : KLPalette.text,
+    return Opacity(
+      opacity: enabled ? 1.0 : 0.35,
+      child: InkWell(
+        onTap: enabled ? onTap : null,
+        borderRadius: BorderRadius.circular(999),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+          decoration: BoxDecoration(
+            color: selected ? KLPalette.primary : KLPalette.bg,
+            borderRadius: BorderRadius.circular(999),
+            border: Border.all(
+              color: enabled ? KLPalette.border : KLPalette.border.withOpacity(0.4),
+            ),
+          ),
+          child: Text(
+            enabled ? label : label,
+            style: TextStyle(
+              fontWeight: FontWeight.w900,
+              color: selected ? Colors.white : KLPalette.text,
+            ),
           ),
         ),
       ),
@@ -2153,6 +2266,7 @@ class BookedServiceUi {
   final Map<String, dynamic>? pricingCaps;
   final double? providerLat;
   final double? providerLng;
+  final bool autoLockTimeSlots;
 
   const BookedServiceUi({
     required this.id,
@@ -2170,6 +2284,7 @@ class BookedServiceUi {
     required this.pricingCaps,
     required this.providerLat,
     required this.providerLng,
+    this.autoLockTimeSlots = true,
   });
 
   ServicePricingVM get pricing {
@@ -2206,4 +2321,10 @@ Future<String?> fetchServiceHeroUrl(String serviceId) async {
   } catch (_) {
     return null;
   }
+}
+
+class _BookedRange {
+  final DateTime start;
+  final DateTime end;
+  _BookedRange(this.start, this.end);
 }
