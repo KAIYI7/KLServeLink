@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../theme.dart';
+import '../core/theme/theme.dart';
 
 class CallingScreen extends StatefulWidget {
   final String name;

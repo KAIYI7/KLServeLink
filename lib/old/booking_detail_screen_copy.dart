@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
-import '../theme.dart';
+import '../core/theme/theme.dart';
 import 'booking_store.dart';
-import '../seeker_nav_controller.dart';
-import '../leave_review_screen.dart';
+import '../features/seeker/navigation/seeker_nav_controller.dart';
+import '../features/reviews/screens/leave_review_screen.dart';
 
 class BookingDetailScreen extends StatelessWidget {
   final BookingUi booking;

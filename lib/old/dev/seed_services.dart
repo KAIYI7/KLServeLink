@@ -1,5 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-import '../../geohash.dart';
+import '../../core/utils/geohash.dart';
 
 Future<void> seedServices() async {
   final db = FirebaseFirestore.instance;

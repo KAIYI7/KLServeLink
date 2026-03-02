@@ -1,9 +1,9 @@
-import 'auth/auth_gate.dart';
+import 'features/auth/screens/auth_gate.dart';
 import 'package:flutter/material.dart';
-import 'package:fyp_flutter/theme.dart';
+import 'package:fyp_flutter/core/theme/theme.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'firebase_options.dart';
-import 'notifications/push_notifications.dart';
+import 'features/notifications/push_notifications.dart';
 
 final GlobalKey<NavigatorState> rootNavKey = GlobalKey<NavigatorState>();
 
