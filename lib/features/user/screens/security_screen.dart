@@ -117,11 +117,7 @@ class SecurityScreen extends StatelessWidget {
                                   AppSnack.show(context, "Password reset email sent to $email", type: AppSnackType.success);
                                 } catch (e) {
                                   if (!context.mounted) return;
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(
-                                      content: Text("Failed to send reset email: $e"),
-                                    ),
-                                  );
+                                  AppSnack.show(context, "Failed to send reset email: $e", type: AppSnackType.error);
                                 }
                               },
                               style: FilledButton.styleFrom(

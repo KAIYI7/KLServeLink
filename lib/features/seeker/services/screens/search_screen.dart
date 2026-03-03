@@ -1836,14 +1836,6 @@ class _ResultCard extends StatelessWidget {
                       child: _SeekerServiceCoverImage(service: s),
                     ),
                     Positioned(
-                      right: 10,
-                      top: 10,
-                      child: Icon(
-                        saved ? Icons.bookmark : Icons.bookmark_border,
-                        color: Colors.white,
-                      ),
-                    ),
-                    Positioned(
                       left: 10,
                       bottom: 10,
                       child: Container(

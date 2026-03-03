@@ -1,3 +1,4 @@
+import '../../../../core/utils/app_snack.dart';
 import '../data/address_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:geocoding/geocoding.dart' as geo;
@@ -529,9 +530,7 @@ class _AddAddressSheetState extends State<_AddAddressSheet> {
       }
     } catch (_) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Couldn’t locate that address. Try adding postcode/city.")),
-      );
+      AppSnack.show(context, "Couldn’t locate that address. Try adding postcode/city.", type: AppSnackType.error);
     }
   }
 
@@ -801,9 +800,7 @@ class _AddAddressSheetState extends State<_AddAddressSheet> {
                       if (!(_formKey.currentState?.validate() ?? false)) return;
 
                       if (!pinned || _pickedLat == null || _pickedLng == null || _pickedGeohash == null) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text("Please pinpoint your location on the map.")),
-                        );
+                        AppSnack.show(context, "Please pinpoint your location on the map.", type: AppSnackType.error);
                         return;
                       }
 

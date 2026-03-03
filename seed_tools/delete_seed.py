@@ -43,6 +43,81 @@ def delete_paths(db: firestore.Client, doc_paths: List[str], label: str, dry_run
             batch.delete(db.document(p))
         batch.commit()
 
+def _normalize_star_counts(raw: object) -> Dict[str, int]:
+    counts: Dict[str, int] = {}
+    if isinstance(raw, dict):
+        for k, v in raw.items():
+            ks = str(k)
+            if ks in ("1", "2", "3", "4", "5"):
+                counts[ks] = int(v) if isinstance(v, (int, float)) else 0
+    for k in ("1", "2", "3", "4", "5"):
+        counts.setdefault(k, 0)
+    return counts
+
+
+def rollback_service_rating_deltas(db: firestore.Client, deltas: Dict, dry_run: bool) -> None:
+    """Best-effort rollback of rating aggregates on services/{serviceId}.
+
+    Works if no other reviews were added/removed since the seed run.
+    """
+    if not deltas:
+        return
+
+    print(f"Rolling back service rating aggregates for {len(deltas)} services...")
+    if dry_run:
+        return
+
+    for service_id, delta in deltas.items():
+        ref = db.collection("services").document(service_id)
+        tx = db.transaction()
+
+        @firestore.transactional
+        def _update(transaction: firestore.Transaction) -> None:
+            snap = ref.get(transaction=transaction)
+            if not snap.exists:
+                return
+            data = snap.to_dict() or {}
+
+            old_count = int(data.get("ratingCount") or 0) if isinstance(data.get("ratingCount"), (int, float)) else 0
+            old_sum = float(data.get("ratingSum") or 0.0) if isinstance(data.get("ratingSum"), (int, float)) else 0.0
+            counts = _normalize_star_counts(data.get("starCounts"))
+
+            d_count = int((delta or {}).get("count") or 0) if isinstance(delta, dict) else 0
+            d_sum = float((delta or {}).get("sum") or 0.0) if isinstance(delta, dict) else 0.0
+            d_stars = (delta or {}).get("stars") if isinstance(delta, dict) else {}
+
+            new_count = max(0, old_count - d_count)
+            new_sum = max(0.0, old_sum - d_sum)
+
+            if isinstance(d_stars, dict):
+                for k, dec in d_stars.items():
+                    ks = str(k)
+                    if ks in counts:
+                        counts[ks] = max(0, int(counts.get(ks, 0)) - int(dec or 0))
+
+            # If count hits 0, reset counts to zeros (avoid stale non-zero map)
+            if new_count == 0:
+                counts = {"1": 0, "2": 0, "3": 0, "4": 0, "5": 0}
+
+            new_avg = (new_sum / new_count) if new_count > 0 else 0.0
+
+            transaction.update(
+                ref,
+                {
+                    "ratingCount": int(new_count),
+                    "ratingSum": float(new_sum),
+                    "ratingAvg": float(new_avg),
+                    "rating": float(new_avg),
+                    "starCounts": counts,
+                    "reviewsAnalyzed": int(new_count),
+                    "updatedAt": firestore.SERVER_TIMESTAMP,
+                },
+            )
+
+        _update(tx)
+
+
+
 
 def delete_seed_tag(db: firestore.Client, seed_tag: str, dry_run: bool) -> None:
     manifest_ref = db.collection("seed_runs").document(seed_tag)
@@ -55,23 +130,32 @@ def delete_seed_tag(db: firestore.Client, seed_tag: str, dry_run: bool) -> None:
     paths: Dict = (m.get("paths") or {})
 
     users = list(paths.get("users") or [])
+    providers = list(paths.get("providers") or [])
+    services = list(paths.get("services") or [])
     bookings = list(paths.get("bookings") or [])
     reviews = list(paths.get("reviews") or [])
     views = list(paths.get("views") or [])
+    service_rating_deltas = m.get("serviceRatingDeltas") or {}
 
     print("===== KLServeLink Seed Delete Plan =====")
     print(f"seedTag:  {seed_tag}")
     print(f"users:    {len(users)}")
+    print(f"providers:{len(providers)}")
+    print(f"services: {len(services)}")
     print(f"bookings: {len(bookings)}")
     print(f"reviews:  {len(reviews)}")
     print(f"views:    {len(views)}")
+    print(f"services (rating rollback): {len(service_rating_deltas)}")
     print("========================================")
 
-    # Delete order: reviews -> views -> bookings -> users
+    # Delete order: reviews -> views -> bookings -> services -> users/providers
     delete_paths(db, reviews, "reviews", dry_run)
+    rollback_service_rating_deltas(db, service_rating_deltas, dry_run)
     delete_paths(db, views, "service_view_events", dry_run)
     delete_paths(db, bookings, "bookings", dry_run)
+    delete_paths(db, services, "services", dry_run)
     delete_paths(db, users, "users", dry_run)
+    delete_paths(db, providers, "providers (users)", dry_run)
 
     if dry_run:
         print("Dry-run enabled: manifest not deleted.")
@@ -113,6 +197,7 @@ def purge_is_synthetic(db: firestore.Client, dry_run: bool) -> None:
     delete_query(db.collection("users").where("isSynthetic", "==", True), "users")
     delete_query(db.collection("bookings").where("isSynthetic", "==", True), "bookings")
     delete_query(db.collection("service_view_events").where("isSynthetic", "==", True), "service_view_events")
+    delete_query(db.collection("services").where("isSynthetic", "==", True), "services")
 
     # Reviews are subcollections: use collection group
     delete_query(db.collection_group("reviews").where("isSynthetic", "==", True), "reviews (collection_group)")

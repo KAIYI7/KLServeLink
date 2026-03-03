@@ -48,3 +48,19 @@ python delete_seed.py --project klservelink --seed-tag <seedTag>
 ## Safety
 - Everything seeded has `isSynthetic=true` and `seedTag=<seedTag>`.
 - Delete uses the manifest so it won't touch your real data.
+
+
+## 4) Seed services with more realistic titles (optional but recommended for demos)
+
+This creates active services with more natural names/descriptions + required fields (`type`, `photoUrls`, etc.).
+Run this first if your current `services` collection looks too synthetic.
+
+```bash
+python seed_services.py --project klservelink   --focus-provider-id <REAL_PROVIDER_UID>   --total-services 50 --focus-provider-services 10
+```
+
+It will print a `seedTag` and a suggested `--primary-service-id` for `seed_firestore.py`.
+
+## Notes on booking schema
+
+`seed_firestore.py` writes a `payment` map (new schema) and keeps `paymentMethod` for backward compatibility.
