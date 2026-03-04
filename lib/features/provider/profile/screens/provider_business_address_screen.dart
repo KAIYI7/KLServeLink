@@ -5,6 +5,7 @@ import '../../../../core/theme/theme.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import '../../../../core/screens/map_picker_screen.dart';
 import 'package:geocoding/geocoding.dart' as geo;
+import '../../../../core/utils/app_snack.dart';
 import '../../../../core/utils/geohash.dart';
 
 class ProviderBusinessAddressScreen extends StatefulWidget {
@@ -62,15 +63,19 @@ class _ProviderBusinessAddressScreenState extends State<ProviderBusinessAddressS
   Future<void> _save() async {
     final addr = ctrl.text.trim();
     if (addr.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Please enter your business address.")),
+      AppSnack.show(
+        context,
+        "Please enter your business address.",
+        type: AppSnackType.error,
       );
       return;
     }
 
     if (!pinned || businessLat == null || businessLng == null || (businessGeohash ?? '').trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Please pin your business location first.")),
+      AppSnack.show(
+        context,
+        "Please pin your business location first.",
+        type: AppSnackType.error,
       );
       return;
     }
@@ -89,11 +94,11 @@ class _ProviderBusinessAddressScreenState extends State<ProviderBusinessAddressS
       }, SetOptions(merge: true));
 
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Business address saved")));
+      AppSnack.show(context, "Business address saved", type: AppSnackType.success);
       Navigator.pop(context);
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Save failed")));
+      AppSnack.show(context, "Save failed", type: AppSnackType.error);
     } finally {
       if (mounted) setState(() => saving = false);
     }
@@ -160,8 +165,10 @@ class _ProviderBusinessAddressScreenState extends State<ProviderBusinessAddressS
   Future<void> _pinFromAddress() async {
     final addr = ctrl.text.trim();
     if (addr.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Please enter an address first.")),
+      AppSnack.show(
+        context,
+        "Please enter an address first.",
+        type: AppSnackType.error,
       );
       return;
     }
@@ -172,8 +179,10 @@ class _ProviderBusinessAddressScreenState extends State<ProviderBusinessAddressS
       final locations = await geo.locationFromAddress(addr);
       if (locations.isEmpty) {
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Could not find this address. Try adding postcode/city.")),
+        AppSnack.show(
+          context,
+          "Could not find this address. Try adding postcode/city.",
+          type: AppSnackType.error,
         );
         return;
       }
@@ -192,13 +201,17 @@ class _ProviderBusinessAddressScreenState extends State<ProviderBusinessAddressS
         pinned = true;
       });
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Pin generated from address. Review it on map if needed.")),
+      AppSnack.show(
+        context,
+        "Pin generated from address. Review it on map if needed.",
+        type: AppSnackType.info,
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Failed to locate address: $e")),
+      AppSnack.show(
+        context,
+        "Failed to locate address. Please try again.",
+        type: AppSnackType.error,
       );
     } finally {
       if (mounted) setState(() => saving = false);

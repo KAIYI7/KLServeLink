@@ -299,8 +299,10 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     final hasPerm = await _recorder.hasPermission();
     if (!hasPerm) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Microphone permission not granted")),
+      AppSnack.show(
+        context,
+        "Microphone permission not granted",
+        type: AppSnackType.error,
       );
       return;
     }

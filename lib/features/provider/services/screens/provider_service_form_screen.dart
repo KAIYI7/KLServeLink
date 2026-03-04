@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:image_picker/image_picker.dart';
 import '../../../../core/models/service_category.dart';
 import 'package:flutter/material.dart';
+import '../../../../core/utils/app_snack.dart';
 import '../../../pricing/screens/dynamic_pricing_rules_editor_screen.dart';
 import '../../../../core/utils/geohash.dart';
 import '../../../../core/theme/theme.dart';
@@ -333,8 +334,10 @@ class _ProviderServiceFormScreenState extends State<ProviderServiceFormScreen> {
 
     if (addr.trim().isEmpty || lat == null || lng == null || gh.trim().isEmpty) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Please set your Business Address first.")),
+      AppSnack.show(
+        context,
+        "Please set your Business Address first.",
+        type: AppSnackType.error,
       );
       return;
     }

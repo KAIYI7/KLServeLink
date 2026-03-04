@@ -587,8 +587,10 @@ class _SectionHeader extends StatelessWidget {
           InkWell(
             onTap: onActionTap ??
                     () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text("$action (TODO)")),
+                  AppSnack.show(
+                    context,
+                    "$action (TODO)",
+                    type: AppSnackType.error,
                   );
                 },
             child: Text(
@@ -1750,8 +1752,10 @@ class _ServiceCard extends StatelessWidget {
 
     return InkWell(
       onTap: () {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Open service ${s.id} (TODO)")),
+        AppSnack.show(
+          context,
+          "Open service ${s.id} (TODO)",
+          type: AppSnackType.error,
         );
       },
       borderRadius: BorderRadius.circular(22),

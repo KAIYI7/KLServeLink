@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:fyp_flutter/core/utils/app_snack.dart';
 import '../../../../core/theme/theme.dart';
 
 class ProviderServiceAreasScreen extends StatefulWidget {
@@ -44,7 +45,11 @@ class _ProviderServiceAreasScreenState extends State<ProviderServiceAreasScreen>
   void _addArea() {
     final v = inputCtrl.text.trim();
     if (v.isEmpty) return;
-    if (areas.any((a) => a.toLowerCase() == v.toLowerCase())) return;
+    final exists = areas.any((a) => a.toLowerCase() == v.toLowerCase());
+    if (exists) {
+      AppSnack.show(context, "Area already added", type: AppSnackType.error);
+      return;
+    }
     setState(() {
       areas.add(v);
       inputCtrl.clear();
@@ -63,11 +68,11 @@ class _ProviderServiceAreasScreenState extends State<ProviderServiceAreasScreen>
       }, SetOptions(merge: true));
 
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Service areas saved")));
+      AppSnack.show(context, "Service areas saved", type: AppSnackType.success);
       Navigator.pop(context);
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Save failed: $e")));
+      AppSnack.show(context, "Save failed: $e", type: AppSnackType.error);
     } finally {
       if (mounted) setState(() => saving = false);
     }
@@ -116,42 +121,46 @@ class _ProviderServiceAreasScreenState extends State<ProviderServiceAreasScreen>
                               ),
                             ),
                             const SizedBox(width: 10),
-                            SizedBox(
-                              height: 56,
-                              width: 56,
-                              child: FilledButton(
-                                onPressed: _addArea,
-                                child: const Icon(Icons.add),
+                            FilledButton(
+                              onPressed: _addArea,
+                              style: FilledButton.styleFrom(
+                                minimumSize: const Size(56, 56),
+                                padding: EdgeInsets.zero,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(16),
+                                ),
                               ),
+                              child: const Icon(Icons.add),
                             ),
                           ],
                         ),
 
                         const SizedBox(height: 14),
 
-                        Wrap(
-                          spacing: 10,
-                          runSpacing: 10,
-                          children: areas.map((a) {
-                            return Chip(
-                              label: Text(a, style: const TextStyle(fontWeight: FontWeight.w900)),
-                              deleteIcon: const Icon(Icons.close),
-                              onDeleted: () => setState(() => areas.remove(a)),
-                            );
-                          }).toList(),
+                        Expanded(
+                          child: SingleChildScrollView(
+                            padding: const EdgeInsets.only(top: 8, bottom: 8),
+                            child: Wrap(
+                              spacing: 10,
+                              runSpacing: 10,
+                              children: areas.map((a) {
+                                return Chip(
+                                  label: Text(a, style: const TextStyle(fontWeight: FontWeight.w900)),
+                                  deleteIcon: const Icon(Icons.close),
+                                  onDeleted: () => setState(() => areas.remove(a)),
+                                );
+                              }).toList(),
+                            ),
+                          ),
                         ),
-
-                        const Spacer(),
+                        const SizedBox(height: 12),
                         SizedBox(
                           width: double.infinity,
                           height: 56,
                           child: FilledButton(
                             onPressed: saving ? null : _save,
                             child: saving
-                                ? const SizedBox(
-                              height: 22, width: 22,
-                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                            )
+                                ? const SizedBox(height: 22, width: 22, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                                 : const Text("Save", style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16)),
                           ),
                         ),

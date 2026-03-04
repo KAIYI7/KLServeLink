@@ -2,6 +2,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:fyp_flutter/core/widgets/service_thumb.dart';
 import '../../../../core/theme/theme.dart';
+import '../../../../core/utils/app_snack.dart';
 import '../data/booking_firestore.dart';
 import '../models/provider_booking_model.dart';
 import 'provider_booking_details_screen.dart';
@@ -431,8 +432,10 @@ class _ProviderBookingsTabState extends State<ProviderBookingsTab> {
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Update failed: $e")),
+      AppSnack.show(
+        context,
+        "Update failed: $e",
+        type: AppSnackType.error,
       );
     }
   }

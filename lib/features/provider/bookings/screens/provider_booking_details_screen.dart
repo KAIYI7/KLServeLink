@@ -171,16 +171,21 @@ class _ProviderBookingDetailsScreenState extends State<ProviderBookingDetailsScr
 
       Navigator.of(loadingCtx).pop();
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Cash marked as received.")),
+      AppSnack.show(
+        context,
+        "Cash marked as received",
+        type: AppSnackType.success,
       );
+
     } catch (e) {
       if (Navigator.of(loadingCtx).canPop()) {
         Navigator.of(loadingCtx).pop();
       }
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Failed to confirm cash.")),
+      AppSnack.show(
+        context,
+        "Failed to confirm cash.",
+        type: AppSnackType.error,
       );
     } finally {
       if (mounted) setState(() => _confirmingCash = false);
@@ -866,8 +871,10 @@ class _ProviderBookingDetailsScreenState extends State<ProviderBookingDetailsScr
     final url = Uri.parse("tel:$p");
     final ok = await launchUrl(url, mode: LaunchMode.externalApplication);
     if (!ok && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Unable to open dialer.")),
+      AppSnack.show(
+        context,
+        "Unable to open dialer.",
+        type: AppSnackType.error,
       );
     }
   }
@@ -880,8 +887,10 @@ class _ProviderBookingDetailsScreenState extends State<ProviderBookingDetailsScr
     );
     final ok = await launchUrl(url, mode: LaunchMode.externalApplication);
     if (!ok && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Unable to open email app.")),
+      AppSnack.show(
+        context,
+        "Unable to open email app.",
+        type: AppSnackType.error,
       );
     }
   }

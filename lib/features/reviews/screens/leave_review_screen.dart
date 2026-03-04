@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import '../../../core/theme/theme.dart';
+import '../../../core/utils/app_snack.dart';
 import '../../seeker/navigation/seeker_nav_controller.dart';
 import '../../seeker/bookings/data/seeker_booking_firestore.dart';
 import 'package:fyp_flutter/core/widgets/service_thumb.dart';
@@ -246,8 +247,10 @@ class _LeaveReviewScreenState extends State<LeaveReviewScreen> {
       Navigator.pop(context, true);
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Failed to submit review: $e")),
+      AppSnack.show(
+        context,
+        "Failed to submit review: $e",
+        type: AppSnackType.error,
       );
     } finally {
       if (mounted) setState(() => isSubmitting = false);

@@ -5,6 +5,7 @@ import 'package:fyp_flutter/core/view_models/service_pricing_vm.dart';
 import 'package:fyp_flutter/features/seeker/navigation/seeker_nav_controller.dart';
 import 'package:fyp_flutter/core/utils/datetime_slot.dart';
 import 'package:fyp_flutter/core/utils/location_area.dart';
+import '../../../../core/utils/app_snack.dart';
 import 'booking_detail_screen.dart';
 import '../../../provider/bookings/data/booking_firestore.dart';
 import '../payments/screens/detail_payment_screen.dart';
@@ -2113,16 +2114,20 @@ class BookingSummaryScreen extends StatelessWidget {
                     Navigator.of(context, rootNavigator: true).pop();
                   }
                   if (!context.mounted) return;
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text(e.message ?? "Booking failed (${e.code})")),
+                  AppSnack.show(
+                    context,
+                    e.message ?? "Booking failed (${e.code})",
+                    type: AppSnackType.error,
                   );
                 } catch (e) {
                   if (Navigator.of(context, rootNavigator: true).canPop()) {
                     Navigator.of(context, rootNavigator: true).pop();
                   }
                   if (!context.mounted) return;
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text("Booking failed: $e")),
+                  AppSnack.show(
+                    context,
+                    "Booking failed: $e",
+                    type: AppSnackType.error,
                   );
                 }
               },

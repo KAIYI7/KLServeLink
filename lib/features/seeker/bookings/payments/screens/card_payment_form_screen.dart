@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../../../../core/theme/theme.dart';
+import '../../../../../core/utils/app_snack.dart';
 
 class CardPaymentFormScreen extends StatefulWidget {
   final double amount;
@@ -83,8 +84,10 @@ class _CardPaymentFormScreenState extends State<CardPaymentFormScreen> {
     if (cvv.length < 3 || cvv.length > 4) errors.add("CVV must be 3–4 digits");
 
     if (errors.isNotEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(errors.first)),
+      AppSnack.show(
+        context,
+        errors.first,
+        type: AppSnackType.error,
       );
       return;
     }

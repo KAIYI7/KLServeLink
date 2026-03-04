@@ -274,8 +274,10 @@ class _ProviderProfileTabState extends State<ProviderProfileTab> {
         await FirebaseAuth.instance.signOut();
       } catch (_) {
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Logout failed. Please try again.")),
+        AppSnack.show(
+          context,
+          "Logout failed. Please try again.",
+          type: AppSnackType.error,
         );
       }
     }

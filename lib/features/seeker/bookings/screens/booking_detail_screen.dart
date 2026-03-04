@@ -432,12 +432,10 @@ class BookingDetailScreen extends StatelessWidget {
                                 );
                               } else {
                                 if (isReviewed) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    const SnackBar(
-                                      content: Text(
-                                        "You already reviewed this booking.",
-                                      ),
-                                    ),
+                                  AppSnack.show(
+                                    context,
+                                    "You already reviewed this booking.",
+                                    type: AppSnackType.info,
                                   );
                                   return;
                                 }
@@ -2238,7 +2236,11 @@ class ProviderProfileScreen extends StatelessWidget {
     final url = Uri.parse("tel:$p");
     final ok = await launchUrl(url, mode: LaunchMode.externalApplication);
     if (!ok && context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Unable to open dialer.")));
+      AppSnack.show(
+        context,
+        "Unable to open dialer.",
+        type: AppSnackType.error,
+      );
     }
   }
 
@@ -2250,7 +2252,11 @@ class ProviderProfileScreen extends StatelessWidget {
     );
     final ok = await launchUrl(url, mode: LaunchMode.externalApplication);
     if (!ok && context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Unable to open email app.")));
+      AppSnack.show(
+        context,
+        "Unable to open email app.",
+        type: AppSnackType.error,
+      );
     }
   }
 
@@ -2259,7 +2265,11 @@ class ProviderProfileScreen extends StatelessWidget {
     final url = Uri.parse("https://www.google.com/maps/search/?api=1&query=$q");
     final ok = await launchUrl(url, mode: LaunchMode.externalApplication);
     if (!ok && context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Unable to open Google Maps.")));
+      AppSnack.show(
+        context,
+        "Unable to open Google Maps.",
+        type: AppSnackType.error,
+      );
     }
   }
 
@@ -2267,7 +2277,11 @@ class ProviderProfileScreen extends StatelessWidget {
     final url = Uri.parse("https://www.google.com/maps/search/?api=1&query=$lat,$lng");
     final ok = await launchUrl(url, mode: LaunchMode.externalApplication);
     if (!ok && context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Unable to open Google Maps.")));
+      AppSnack.show(
+        context,
+        "Unable to open Google Maps.",
+        type: AppSnackType.error,
+      );
     }
   }
 }
