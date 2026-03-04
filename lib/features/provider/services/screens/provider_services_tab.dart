@@ -96,7 +96,7 @@ class _ProviderServicesTabState extends State<ProviderServicesTab> {
       ),
 
       floatingActionButton: Padding (
-        padding: const EdgeInsets.only(bottom: 55),
+        padding: const EdgeInsets.only(bottom: 75),
         child : FloatingActionButton(
         backgroundColor: KLPalette.primary,
         foregroundColor: Colors.white,

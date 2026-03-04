@@ -696,6 +696,11 @@ def main() -> None:
     ap.add_argument("--views", type=int, default=15000)
     ap.add_argument("--views-recent-days", type=int, default=28)
     ap.add_argument("--views-recent-share", type=float, default=0.80)  # 80% views inside last 28 days
+    ap.add_argument("--bookings-recent-days", type=int, default=28, help="Bias bookings into the most recent N days (align with AI forecast window)")
+    ap.add_argument("--bookings-recent-share", type=float, default=0.70, help="Share of NON-future bookings scheduled inside --bookings-recent-days (0-1)")
+    ap.add_argument("--bookings-recency-boost", type=float, default=1.25, help="Extra weight for more recent days inside the recent window (0=flat, higher=more recent-heavy)")
+    ap.add_argument("--bookings-max-per-day-recent", type=int, default=14, help="Soft cap for bookings per day inside recent window (spreads data for forecasting)")
+    ap.add_argument("--manifest-max-paths", type=int, default=50, help="Max doc paths to store per category in seed_runs (0=none). Avoids Firestore index entry limits.")
     ap.add_argument("--months", type=int, default=6, help="How many months of history to seed")
     ap.add_argument("--future-share", type=float, default=0.03, help="Share of bookings scheduled in the future (0-1)")
     ap.add_argument("--future-days", type=int, default=10, help="Max days ahead for future bookings")
@@ -756,7 +761,28 @@ def main() -> None:
     for uid, _name in seeker_list[1:]:
         seeker_email_by_id[uid] = f"{uid}@example.com"
 
-    weights = build_day_weights(start_day, end_day, holidays)
+    weights_all = build_day_weights(start_day, end_day, holidays)
+
+    # --- Booking date weighting tuned for AI forecasting ---
+    # The AI forecaster (ai_batch/app/forecast.py) typically trains on the most recent window (default 28 days).
+    # To make seeded bookings immediately useful, we bias a configurable share of non-future bookings into that same window.
+    recent_days = max(1, int(args.bookings_recent_days))
+    recent_start = max(start_day, end_day - dt.timedelta(days=recent_days - 1))
+
+    weights_recent_raw = [(d, w) for (d, w) in weights_all if d >= recent_start]
+    if weights_recent_raw:
+        span = max(1, (end_day - recent_start).days)
+        weights_recent = []
+        for d, w in weights_recent_raw:
+            # t=0 at recent_start, t=1 at end_day; recency boost increases weight toward end_day
+            t = (d - recent_start).days / span
+            w2 = float(w) * (1.0 + float(args.bookings_recency_boost) * float(t))
+            weights_recent.append((d, w2))
+    else:
+        weights_recent = []
+
+    weights_older = [(d, w) for (d, w) in weights_all if d < recent_start]
+    weights = weights_all  # keep original name for view seeding
     provider_weight = 0.60 if provider_services else 0.0
 
     def pick_service_for_user(cluster_cats: List[str]) -> ServiceInfo:
@@ -775,6 +801,8 @@ def main() -> None:
     booking_docs: List[Dict] = []
     booking_indices_by_service: Dict[str, List[int]] = {}
     booking_completed_indices_by_service: Dict[str, List[int]] = {}
+    recent_day_counts: Dict[dt.date, int] = {}
+
 
 
     for i in range(args.bookings):
@@ -784,7 +812,23 @@ def main() -> None:
         if is_future:
             day = _now_local().date() + dt.timedelta(days=random.randint(1, int(args.future_days)))
         else:
-            day = weighted_choice_date(weights)
+            # Bias NON-future bookings into the recent window so ai_batch/app/forecast.py has enough signal
+            use_recent = (random.random() < float(args.bookings_recent_share)) or (not weights_older)
+            chosen_weights = weights_recent if (use_recent and weights_recent) else (weights_older if weights_older else weights_all)
+
+            # Soft cap per-day inside the recent window to spread data (helps hourly resampling coverage)
+            if use_recent and int(args.bookings_max_per_day_recent) > 0:
+                cap = int(args.bookings_max_per_day_recent)
+                picked: Optional[dt.date] = None
+                for _ in range(25):
+                    cand = weighted_choice_date(chosen_weights)
+                    if recent_day_counts.get(cand, 0) < cap:
+                        picked = cand
+                        break
+                day = picked if picked is not None else weighted_choice_date(chosen_weights)
+                recent_day_counts[day] = recent_day_counts.get(day, 0) + 1
+            else:
+                day = weighted_choice_date(chosen_weights)
 
         hour = choose_hour()
         minute = choose_minute()
@@ -960,6 +1004,14 @@ def main() -> None:
     print(f"project: {args.project}")
     print(f"seedTag: {seed_tag}")
     print(f"history window: {start_day} .. {end_day} (local)")
+    # Quick sanity-check for AI forecasting (ai_batch/app/jobs.py filters bookings by scheduledAt >= now - window_days)
+    fc_days = max(1, int(args.bookings_recent_days))
+    cutoff_utc = dt.datetime.now(tz=dt.timezone.utc) - dt.timedelta(days=fc_days)
+    recent_total = sum(1 for b in booking_docs if isinstance(b.get("scheduledAt"), dt.datetime) and b["scheduledAt"] >= cutoff_utc)
+    recent_provider = sum(1 for b in booking_docs if b.get("providerId") == args.provider_id and isinstance(b.get("scheduledAt"), dt.datetime) and b["scheduledAt"] >= cutoff_utc)
+    recent_provider_completed = sum(1 for b in booking_docs if b.get("providerId") == args.provider_id and isinstance(b.get("scheduledAt"), dt.datetime) and b["scheduledAt"] >= cutoff_utc and str(b.get("status","")).lower() == "completed")
+    print(f"forecast window: last {fc_days} days (UTC cutoff: {cutoff_utc.isoformat()} )")
+    print(f"bookings in forecast window: {recent_total} (provider: {recent_provider}, provider completed: {recent_provider_completed})")
     print(f"holiday spikes: {', '.join([d.isoformat() for d in holidays])}")
     print(f"synthetic seekers: {len(synthetic_user_docs)} (plus 1 real seeker)")
     print(f"bookings to create: {len(booking_docs)}")
@@ -1090,11 +1142,13 @@ def main() -> None:
             "reviews": len(created_review_paths),
             "views": len(created_view_paths),
         },
+        "pathsTruncated": True,
         "paths": {
-            "users": created_user_paths,
-            "bookings": created_booking_paths,
-            "reviews": created_review_paths,
-            "views": created_view_paths,
+            "users": created_user_paths[:max(0, args.manifest_max_paths)],
+            "bookings": created_booking_paths[:max(0, args.manifest_max_paths)],
+            "reviews": created_review_paths[:max(0, args.manifest_max_paths)],
+            # Views can be huge (e.g., 20k). Keep only a small sample to avoid Firestore INDEX_ENTRIES_COUNT_LIMIT_EXCEEDED.
+            "views": created_view_paths[:max(0, min(args.manifest_max_paths, 20))],
         },
         "serviceRatingDeltas": service_rating_deltas,
         "providerId_focus": args.provider_id,

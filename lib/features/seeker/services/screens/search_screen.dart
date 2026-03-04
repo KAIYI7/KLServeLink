@@ -339,8 +339,8 @@ class _SearchFilterSheetState extends State<_SearchFilterSheet> {
     nearbyOnly = widget.initial.nearbyOnly;
     radiusKm = widget.initial.radiusKm;
     _categoryKey = widget.initial.categoryKey;
-    final minP = widget.initial.minPrice ?? 10;
-    final maxP = widget.initial.maxPrice ?? 100;
+    final minP = widget.initial.minPrice ?? 0;
+    final maxP = widget.initial.maxPrice ?? 500;
     priceRange = RangeValues(minP.toDouble(), maxP.toDouble());
     lowPriceCtrl = TextEditingController(text: priceRange.start.toInt().toString());
     highPriceCtrl = TextEditingController(text: priceRange.end.toInt().toString());
@@ -379,7 +379,7 @@ class _SearchFilterSheetState extends State<_SearchFilterSheet> {
     if (n == null) return;
 
     final start = priceRange.start.toInt();
-    final endClamped = n.clamp(start, 200).toDouble();
+    final endClamped = n.clamp(start, 1000).toDouble();
 
     setState(() {
       priceRange = RangeValues(priceRange.start, endClamped);
@@ -560,8 +560,8 @@ class _SearchFilterSheetState extends State<_SearchFilterSheet> {
                     RangeSlider(
                       values: priceRange,
                       min: 0,
-                      max: 200,
-                      divisions: 40,
+                      max: 1000,
+                      divisions: 100,
                       activeColor: KLPalette.primary,
                       onChanged: (v) => setState(() {
                         priceRange = v;
@@ -587,7 +587,7 @@ class _SearchFilterSheetState extends State<_SearchFilterSheet> {
                                 enabledBorder: InputBorder.none,
                                 focusedBorder: InputBorder.none,
                                 isDense: true,
-                                hintText: "Low price",
+                                hintText: "Min (RM)",
                               ),
                               onChanged: _setLowFromText,
                             ),
@@ -610,7 +610,7 @@ class _SearchFilterSheetState extends State<_SearchFilterSheet> {
                                 enabledBorder: InputBorder.none,
                                 focusedBorder: InputBorder.none,
                                 isDense: true,
-                                hintText: "High price",
+                                hintText: "Max (RM)",
                               ),
                               onChanged: _setHighFromText,
                             ),
@@ -685,7 +685,7 @@ class _SearchFilterSheetState extends State<_SearchFilterSheet> {
                           nearbyOnly = false;
                           radiusKm = 5;
                           _categoryKey = null;
-                          priceRange = const RangeValues(10, 100);
+                          priceRange = const RangeValues(0, 500);
                           minRating = null;
                           _syncPriceCtrls();
                         });

@@ -18,7 +18,7 @@ python delete_seed.py --project klservelink --all-seeds --purge-isSynthetic
 from __future__ import annotations
 
 import argparse
-from typing import Iterable, List, Optional, Dict
+from typing import Iterable, List, Optional, Dict, Set
 
 from google.cloud import firestore
 
@@ -42,6 +42,108 @@ def delete_paths(db: firestore.Client, doc_paths: List[str], label: str, dry_run
         for p in chunk:
             batch.delete(db.document(p))
         batch.commit()
+
+
+def _batch_delete_refs(db: firestore.Client, refs: List[firestore.DocumentReference], label: str, dry_run: bool) -> None:
+    if not refs:
+        return
+    print(f"Deleting {len(refs)} docs from {label}...")
+    if dry_run:
+        return
+    for chunk in chunked(refs, BATCH_LIMIT):
+        batch = db.batch()
+        for r in chunk:
+            batch.delete(r)
+        batch.commit()
+
+
+def recompute_service_ratings(db: firestore.Client, service_ids: Set[str], dry_run: bool) -> None:
+    """Rebuild rating aggregates from remaining top-level reviews for the given services."""
+    if not service_ids:
+        return
+    print(f"Recomputing service rating aggregates for {len(service_ids)} services...")
+    if dry_run:
+        return
+
+    for service_id in sorted(service_ids):
+        q = db.collection("reviews").where("serviceId", "==", service_id)
+        count = 0
+        ssum = 0.0
+        stars = {"1": 0, "2": 0, "3": 0, "4": 0, "5": 0}
+
+        for doc in q.stream():
+            d = doc.to_dict() or {}
+            # Skip soft-deleted if present
+            if d.get("isDeleted") is True:
+                continue
+            try:
+                st_i = int(d.get("stars"))
+            except Exception:
+                continue
+            if 1 <= st_i <= 5:
+                count += 1
+                ssum += float(st_i)
+                stars[str(st_i)] = int(stars.get(str(st_i), 0)) + 1
+
+        avg = (ssum / count) if count > 0 else 0.0
+        db.collection("services").document(service_id).set(
+            {
+                "ratingCount": int(count),
+                "ratingSum": float(ssum),
+                "ratingAvg": float(avg),
+                "rating": float(avg),
+                "starCounts": stars,
+                "reviewsAnalyzed": int(count),
+                "updatedAt": firestore.SERVER_TIMESTAMP,
+            },
+            merge=True,
+        )
+
+
+def delete_by_seedtag_query(db: firestore.Client, seed_tag: str, dry_run: bool, recompute_ratings: bool) -> None:
+    """Delete seeded docs by filtering seedTag==<seed_tag> across known collections.
+
+    This is the safe fallback when:
+    - seed_runs/<seed_tag> is missing (seed crashed before writing manifest)
+    - seed_runs/<seed_tag> only stores sampled paths (pathsTruncated=true)
+    """
+    targets = [
+        ("reviews (collection_group)", db.collection_group("reviews")),
+        ("service_view_events", db.collection("service_view_events")),
+        ("bookings", db.collection("bookings")),
+        ("users", db.collection("users")),
+    ]
+
+    affected_service_ids: Set[str] = set()
+
+    print("===== KLServeLink Seed Delete Plan (by query) =====")
+    print(f"seedTag:  {seed_tag}")
+    print("Targets:  reviews, service_view_events, bookings, users")
+    print("===================================================")
+
+    for label, colref in targets:
+        refs: List[firestore.DocumentReference] = []
+        q = colref.where("seedTag", "==", seed_tag)
+
+        for doc in q.stream():
+            if label == "reviews":
+                try:
+                    d = doc.to_dict() or {}
+                    sid = d.get("serviceId")
+                    if isinstance(sid, str) and sid:
+                        affected_service_ids.add(sid)
+                except Exception:
+                    pass
+
+            refs.append(doc.reference)
+            if len(refs) >= BATCH_LIMIT:
+                _batch_delete_refs(db, refs, label, dry_run)
+                refs = []
+
+        _batch_delete_refs(db, refs, label, dry_run)
+
+    if recompute_ratings and affected_service_ids:
+        recompute_service_ratings(db, affected_service_ids, dry_run)
 
 def _normalize_star_counts(raw: object) -> Dict[str, int]:
     counts: Dict[str, int] = {}
@@ -119,14 +221,29 @@ def rollback_service_rating_deltas(db: firestore.Client, deltas: Dict, dry_run: 
 
 
 
-def delete_seed_tag(db: firestore.Client, seed_tag: str, dry_run: bool) -> None:
+def delete_seed_tag(db: firestore.Client, seed_tag: str, dry_run: bool, recompute_ratings: bool) -> None:
     manifest_ref = db.collection("seed_runs").document(seed_tag)
     snap = manifest_ref.get()
+
+    # If the seed crashed before writing seed_runs/<seed_tag>, fall back to query deletes.
     if not snap.exists:
-        print(f"WARNING: seed_runs/{seed_tag} not found (skipping).")
+        print(f"WARNING: seed_runs/{seed_tag} not found. Falling back to deleting by seedTag query...")
+        delete_by_seedtag_query(db, seed_tag, dry_run=dry_run, recompute_ratings=recompute_ratings)
         return
 
     m = snap.to_dict() or {}
+
+    # Newer seeders may store only sampled paths to avoid Firestore index entry limits.
+    if m.get("pathsTruncated") is True:
+        print(f"INFO: seed_runs/{seed_tag} contains sampled paths (pathsTruncated=true). Deleting by seedTag query for full cleanup...")
+        delete_by_seedtag_query(db, seed_tag, dry_run=dry_run, recompute_ratings=recompute_ratings)
+        if dry_run:
+            print("Dry-run enabled: manifest not deleted.")
+            return
+        manifest_ref.delete()
+        print("Deleted seeded docs (by query) and manifest.")
+        return
+
     paths: Dict = (m.get("paths") or {})
 
     users = list(paths.get("users") or [])
@@ -163,6 +280,7 @@ def delete_seed_tag(db: firestore.Client, seed_tag: str, dry_run: bool) -> None:
 
     manifest_ref.delete()
     print("Deleted seeded docs and manifest.")
+
 
 
 def purge_is_synthetic(db: firestore.Client, dry_run: bool) -> None:
@@ -210,8 +328,11 @@ def main() -> None:
     ap.add_argument("--seed-tag", help="Delete a single seed tag")
     ap.add_argument("--all-seeds", action="store_true", help="Delete ALL seed runs found under seed_runs/")
     ap.add_argument("--purge-isSynthetic", action="store_true", help="Also delete any remaining docs with isSynthetic==True")
+    ap.add_argument("--no-recompute-ratings", action="store_true", help="Skip rebuilding service rating aggregates after query-mode deletes")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
+
+    recompute_ratings = not args.no_recompute_ratings
 
     db = firestore.Client(project=args.project)
 
@@ -223,9 +344,9 @@ def main() -> None:
         seed_tags = [s.id for s in seeds]
         print(f"Found {len(seed_tags)} seed_runs docs.")
         for tag in seed_tags:
-            delete_seed_tag(db, tag, args.dry_run)
+            delete_seed_tag(db, tag, args.dry_run, recompute_ratings)
     else:
-        delete_seed_tag(db, args.seed_tag, args.dry_run)
+        delete_seed_tag(db, args.seed_tag, args.dry_run, recompute_ratings)
 
     if args.purge_isSynthetic:
         purge_is_synthetic(db, args.dry_run)

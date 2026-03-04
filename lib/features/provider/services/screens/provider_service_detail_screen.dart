@@ -1333,14 +1333,14 @@ class ProviderServiceInsightsMini extends StatelessWidget {
 
                     Row(
                       children: [
-                        Expanded(child: _MiniStat(label: "Last 7 days", value: last7.toString(), bg: KLPalette.tint50)),
+                        Expanded(child: _MiniStat(label: "Bookings\n(Last 7d)", value: last7.toString(), bg: KLPalette.tint50)),
                         const SizedBox(width: 10),
-                        Expanded(child: _MiniStat(label: "Last 28 days", value: last28.toString(), bg: KLPalette.tint50)),
+                        Expanded(child: _MiniStat(label: "Bookings\n(Last 28d)", value: last28.toString(), bg: KLPalette.tint50)),
                       ],
                     ),
 
                     const SizedBox(height: 14),
-                    const Text("AI business prediction (next 7d)", style: TextStyle(fontWeight: FontWeight.w900)),
+                    const Text("High Opportunity Hours (next 7d)", style: TextStyle(fontWeight: FontWeight.w900)),
                     const SizedBox(height: 8),
 
                     // --- AI slots from users/{uid}.opportunity_index ---
