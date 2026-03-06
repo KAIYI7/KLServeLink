@@ -540,300 +540,302 @@ class _AddAddressSheetState extends State<_AddAddressSheet> {
 
     return Padding(
       padding: EdgeInsets.fromLTRB(20, 14, 20, 14 + bottomInset),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            height: 4,
-            width: 46,
-            decoration: BoxDecoration(
-              color: KLPalette.border,
-              borderRadius: BorderRadius.circular(999),
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              height: 4,
+              width: 46,
+              decoration: BoxDecoration(
+                color: KLPalette.border,
+                borderRadius: BorderRadius.circular(999),
+              ),
             ),
-          ),
-          const SizedBox(height: 14),
-
-          Row(
-            children: [
-              const Text(
-                "Add New Address",
-                style: TextStyle(fontWeight: FontWeight.w900, fontSize: 18),
-              ),
-              const Spacer(),
-              IconButton(
-                onPressed: () => Navigator.pop(context),
-                icon: const Icon(Icons.close),
-              ),
-            ],
-          ),
-
-          const SizedBox(height: 8),
-
-          Form(
-            key: _formKey,
-            child: Column(
+            const SizedBox(height: 14),
+        
+            Row(
               children: [
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    "Address Type",
-                    style: TextStyle(
-                      fontWeight: FontWeight.w900,
-                      color: KLPalette.text2,
-                    ),
-                  ),
+                const Text(
+                  "Add New Address",
+                  style: TextStyle(fontWeight: FontWeight.w900, fontSize: 18),
                 ),
-                const SizedBox(height: 10),
-
-                Wrap(
-                  spacing: 10,
-                  runSpacing: 10,
-                  children: ["Home", "Apartment", "Office", "Other"].map((t) {
-                    final selected = t == type;
-                    return _PillChip(
-                      label: t,
-                      selected: selected,
-                      onTap: () => setState(() => type = t),
-                    );
-                  }).toList(),
+                const Spacer(),
+                IconButton(
+                  onPressed: () => Navigator.pop(context),
+                  icon: const Icon(Icons.close),
                 ),
-
-                const SizedBox(height: 14),
-
-                _Field(
-                  label: "Label",
-                  hint: "e.g. My Home",
-                  controller: _labelCtrl,
-                  validator: (v) => (v == null || v.trim().isEmpty) ? "Enter a label" : null,
-                ),
-                const SizedBox(height: 12),
-
-                Row(
-                  children: [
-                    Expanded(
-                      child: _Field(
-                        label: "Contact Name",
-                        hint: "Full name",
-                        controller: _nameCtrl,
-                        validator: (v) => (v == null || v.trim().isEmpty) ? "Enter name" : null,
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: _Field(
-                        label: "Phone",
-                        hint: "+60...",
-                        controller: _phoneCtrl,
-                        keyboardType: TextInputType.phone,
-                        validator: (v) => (v == null || v.trim().length < 6) ? "Enter phone" : null,
-                      ),
-                    ),
-                  ],
-                ),
-
-                const SizedBox(height: 12),
-
-                _Field(
-                  label: "Full Address",
-                  hint: "Street, area, postcode, Kuala Lumpur",
-                  controller: _addrCtrl,
-                  maxLines: 3,
-                  validator: (v) => (v == null || v.trim().isEmpty) ? "Enter address" : null,
-                ),
-
-                const SizedBox(height: 10),
-                SizedBox(
-                  width: double.infinity,
-                  height: 48,
-                  child: OutlinedButton.icon(
-                    style: OutlinedButton.styleFrom(
-                      side: const BorderSide(color: KLPalette.border),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
-                    ),
-                    onPressed: _locateFromTypedAddress,
-                    icon: const Icon(Icons.my_location, color: KLPalette.text),
-                    label: const Text(
-                      "Locate on map",
-                      style: TextStyle(fontWeight: FontWeight.w900, color: KLPalette.text),
-                    ),
-                  ),
-                ),
-
-                const SizedBox(height: 12),
-
-                // Pinpoint
-                InkWell(
-                  onTap: () async {
-                    final result = await Navigator.push<MapPickResult>(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => MapPickerScreen(
-                          initial: (_lastLatLng != null) ? _lastLatLng : null,
-                        ),
-                      ),
-                    );
-
-                    if (result == null) return;
-
-                    setState(() {
-                      pinned = true;
-                      _pickedLat = result.lat;
-                      _pickedLng = result.lng;
-                      _pickedGeohash = result.geohash;
-                      _lastLatLng = LatLng(result.lat, result.lng);
-                    });
-
-                    if ((result.formattedAddress ?? "").trim().isNotEmpty) {
-                      _addrCtrl.text = result.formattedAddress!.trim();
-                    } else {
-                      await _fillAddressFromPin(result.lat, result.lng);
-                    }
-                  },
-                  borderRadius: BorderRadius.circular(18),
-                  child: Container(
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      color: KLPalette.mutedBg,
-                      borderRadius: BorderRadius.circular(18),
-                      border: Border.all(color: KLPalette.border),
-                    ),
-                    child: Row(
-                      children: [
-                        Container(
-                          height: 44,
-                          width: 44,
-                          decoration: BoxDecoration(
-                            color: KLPalette.bg,
-                            shape: BoxShape.circle,
-                            border: Border.all(color: KLPalette.border),
-                          ),
-                          child: Icon(
-                            pinned ? Icons.check_circle : Icons.my_location,
-                            color: pinned ? KLPalette.primary : KLPalette.text2,
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text(
-                                "Pinpoint Location",
-                                style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
-                              ),
-                              const SizedBox(height: 4),
-
-                              if (pinned && _pickedLat != null && _pickedLng != null && _pickedGeohash != null)
-                                Text(
-                                  "Pinned • ${_pickedLat!.toStringAsFixed(5)}, ${_pickedLng!.toStringAsFixed(5)}",
-                                  style: const TextStyle(
-                                    color: KLPalette.text2,
-                                    fontWeight: FontWeight.w800,
-                                    height: 1.2,
-                                  ),
-                                )
-                              else
-                                const Text(
-                                  "Tap to set location on map",
-                                  style: TextStyle(
-                                    color: KLPalette.text2,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                            ],
-                          ),
-                        ),
-                        Text(
-                          pinned ? "Change" : "",
-                          style: const TextStyle(fontWeight: FontWeight.w900, color: KLPalette.text2),
-                        ),
-                        const SizedBox(width: 8),
-                        const Icon(Icons.arrow_forward, color: KLPalette.text2),
-                      ],
-                    ),
-                  ),
-                ),
-
-
-                const SizedBox(height: 10),
-
-                // Main address toggle
-                InkWell(
-                  onTap: () => setState(() => isMain = !isMain),
-                  borderRadius: BorderRadius.circular(18),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                    decoration: BoxDecoration(
-                      color: KLPalette.bg,
-                      borderRadius: BorderRadius.circular(18),
-                      border: Border.all(color: KLPalette.border),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(
-                          isMain ? Icons.radio_button_checked : Icons.radio_button_off,
-                          color: isMain ? KLPalette.primary : KLPalette.text2,
-                        ),
-                        const SizedBox(width: 10),
-                        const Expanded(
-                          child: Text(
-                            "Set as Main Address",
-                            style: TextStyle(fontWeight: FontWeight.w900),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-
-                const SizedBox(height: 14),
-
-                SizedBox(
-                  width: double.infinity,
-                  height: 56,
-                  child: FilledButton(
-                    style: FilledButton.styleFrom(
-                      backgroundColor: KLPalette.primary,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
-                    ),
-                    onPressed: () {
-                      if (!(_formKey.currentState?.validate() ?? false)) return;
-
-                      if (!pinned || _pickedLat == null || _pickedLng == null || _pickedGeohash == null) {
-                        AppSnack.show(context, "Please pinpoint your location on the map.", type: AppSnackType.error);
-                        return;
-                      }
-
-                      final title = _labelCtrl.text.trim();
-                      final addr = _addrCtrl.text.trim();
-
-                      final created = AddressUiModel(
-                        id: widget.initial?.id ?? "",
-                        title: title,
-                        addressLine: addr,
-                        contactName: _nameCtrl.text.trim(),
-                        contactPhone: _phoneCtrl.text.trim(),
-                        addressType: type,
-                        isMain: isMain,
-                        lat: _pickedLat,
-                        lng: _pickedLng,
-                        geohash: _pickedGeohash,
-                      );
-
-                      Navigator.pop(context, created);
-                    },
-                    child: const Text(
-                      "Save Address",
-                      style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
-                    ),
-                  ),
-                ),
-
-                const SizedBox(height: 8),
               ],
             ),
-          ),
-        ],
+        
+            const SizedBox(height: 8),
+        
+            Form(
+              key: _formKey,
+              child: Column(
+                children: [
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      "Address Type",
+                      style: TextStyle(
+                        fontWeight: FontWeight.w900,
+                        color: KLPalette.text2,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+        
+                  Wrap(
+                    spacing: 10,
+                    runSpacing: 10,
+                    children: ["Home", "Apartment", "Office", "Other"].map((t) {
+                      final selected = t == type;
+                      return _PillChip(
+                        label: t,
+                        selected: selected,
+                        onTap: () => setState(() => type = t),
+                      );
+                    }).toList(),
+                  ),
+        
+                  const SizedBox(height: 14),
+        
+                  _Field(
+                    label: "Label",
+                    hint: "e.g. My Home",
+                    controller: _labelCtrl,
+                    validator: (v) => (v == null || v.trim().isEmpty) ? "Enter a label" : null,
+                  ),
+                  const SizedBox(height: 12),
+        
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _Field(
+                          label: "Contact Name",
+                          hint: "Full name",
+                          controller: _nameCtrl,
+                          validator: (v) => (v == null || v.trim().isEmpty) ? "Enter name" : null,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: _Field(
+                          label: "Phone",
+                          hint: "+60...",
+                          controller: _phoneCtrl,
+                          keyboardType: TextInputType.phone,
+                          validator: (v) => (v == null || v.trim().length < 6) ? "Enter phone" : null,
+                        ),
+                      ),
+                    ],
+                  ),
+        
+                  const SizedBox(height: 12),
+        
+                  _Field(
+                    label: "Full Address",
+                    hint: "Street, area, postcode, Kuala Lumpur",
+                    controller: _addrCtrl,
+                    maxLines: 3,
+                    validator: (v) => (v == null || v.trim().isEmpty) ? "Enter address" : null,
+                  ),
+        
+                  const SizedBox(height: 10),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 48,
+                    child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        side: const BorderSide(color: KLPalette.border),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
+                      ),
+                      onPressed: _locateFromTypedAddress,
+                      icon: const Icon(Icons.my_location, color: KLPalette.text),
+                      label: const Text(
+                        "Locate on map",
+                        style: TextStyle(fontWeight: FontWeight.w900, color: KLPalette.text),
+                      ),
+                    ),
+                  ),
+        
+                  const SizedBox(height: 12),
+        
+                  // Pinpoint
+                  InkWell(
+                    onTap: () async {
+                      final result = await Navigator.push<MapPickResult>(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => MapPickerScreen(
+                            initial: (_lastLatLng != null) ? _lastLatLng : null,
+                          ),
+                        ),
+                      );
+        
+                      if (result == null) return;
+        
+                      setState(() {
+                        pinned = true;
+                        _pickedLat = result.lat;
+                        _pickedLng = result.lng;
+                        _pickedGeohash = result.geohash;
+                        _lastLatLng = LatLng(result.lat, result.lng);
+                      });
+        
+                      if ((result.formattedAddress ?? "").trim().isNotEmpty) {
+                        _addrCtrl.text = result.formattedAddress!.trim();
+                      } else {
+                        await _fillAddressFromPin(result.lat, result.lng);
+                      }
+                    },
+                    borderRadius: BorderRadius.circular(18),
+                    child: Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: KLPalette.mutedBg,
+                        borderRadius: BorderRadius.circular(18),
+                        border: Border.all(color: KLPalette.border),
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            height: 44,
+                            width: 44,
+                            decoration: BoxDecoration(
+                              color: KLPalette.bg,
+                              shape: BoxShape.circle,
+                              border: Border.all(color: KLPalette.border),
+                            ),
+                            child: Icon(
+                              pinned ? Icons.check_circle : Icons.my_location,
+                              color: pinned ? KLPalette.primary : KLPalette.text2,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text(
+                                  "Pinpoint Location",
+                                  style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
+                                ),
+                                const SizedBox(height: 4),
+        
+                                if (pinned && _pickedLat != null && _pickedLng != null && _pickedGeohash != null)
+                                  Text(
+                                    "Pinned • ${_pickedLat!.toStringAsFixed(5)}, ${_pickedLng!.toStringAsFixed(5)}",
+                                    style: const TextStyle(
+                                      color: KLPalette.text2,
+                                      fontWeight: FontWeight.w800,
+                                      height: 1.2,
+                                    ),
+                                  )
+                                else
+                                  const Text(
+                                    "Tap to set location on map",
+                                    style: TextStyle(
+                                      color: KLPalette.text2,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                          Text(
+                            pinned ? "Change" : "",
+                            style: const TextStyle(fontWeight: FontWeight.w900, color: KLPalette.text2),
+                          ),
+                          const SizedBox(width: 8),
+                          const Icon(Icons.arrow_forward, color: KLPalette.text2),
+                        ],
+                      ),
+                    ),
+                  ),
+        
+        
+                  const SizedBox(height: 10),
+        
+                  // Main address toggle
+                  InkWell(
+                    onTap: () => setState(() => isMain = !isMain),
+                    borderRadius: BorderRadius.circular(18),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      decoration: BoxDecoration(
+                        color: KLPalette.bg,
+                        borderRadius: BorderRadius.circular(18),
+                        border: Border.all(color: KLPalette.border),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            isMain ? Icons.radio_button_checked : Icons.radio_button_off,
+                            color: isMain ? KLPalette.primary : KLPalette.text2,
+                          ),
+                          const SizedBox(width: 10),
+                          const Expanded(
+                            child: Text(
+                              "Set as Main Address",
+                              style: TextStyle(fontWeight: FontWeight.w900),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+        
+                  const SizedBox(height: 14),
+        
+                  SizedBox(
+                    width: double.infinity,
+                    height: 56,
+                    child: FilledButton(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: KLPalette.primary,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
+                      ),
+                      onPressed: () {
+                        if (!(_formKey.currentState?.validate() ?? false)) return;
+        
+                        if (!pinned || _pickedLat == null || _pickedLng == null || _pickedGeohash == null) {
+                          AppSnack.show(context, "Please pinpoint your location on the map.", type: AppSnackType.error);
+                          return;
+                        }
+        
+                        final title = _labelCtrl.text.trim();
+                        final addr = _addrCtrl.text.trim();
+        
+                        final created = AddressUiModel(
+                          id: widget.initial?.id ?? "",
+                          title: title,
+                          addressLine: addr,
+                          contactName: _nameCtrl.text.trim(),
+                          contactPhone: _phoneCtrl.text.trim(),
+                          addressType: type,
+                          isMain: isMain,
+                          lat: _pickedLat,
+                          lng: _pickedLng,
+                          geohash: _pickedGeohash,
+                        );
+        
+                        Navigator.pop(context, created);
+                      },
+                      child: const Text(
+                        "Save Address",
+                        style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
+                      ),
+                    ),
+                  ),
+        
+                  const SizedBox(height: 8),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

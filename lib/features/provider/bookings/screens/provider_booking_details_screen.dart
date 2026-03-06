@@ -257,7 +257,7 @@ class _ProviderBookingDetailsScreenState extends State<ProviderBookingDetailsScr
                       const Spacer(),
                       TextButton(
                         onPressed: () => _showHistory(context, widget.bookingId),
-                        child: const Text("Check Status", style: TextStyle(fontWeight: FontWeight.w900)),
+                        child: const Text("Status History", style: TextStyle(fontWeight: FontWeight.w900)),
                       ),
                     ],
                   ),
@@ -761,7 +761,7 @@ class _ProviderBookingDetailsScreenState extends State<ProviderBookingDetailsScr
               const SizedBox(height: 12),
               Row(
                 children: [
-                  const Text("Booking History", style: TextStyle(fontWeight: FontWeight.w900, fontSize: 18)),
+                  const Text("Status History", style: TextStyle(fontWeight: FontWeight.w900, fontSize: 18)),
                   const Spacer(),
                   Text("ID: #${bookingId.substring(0, 6)}", style: const TextStyle(fontWeight: FontWeight.w800, color: KLPalette.text2)),
                 ],

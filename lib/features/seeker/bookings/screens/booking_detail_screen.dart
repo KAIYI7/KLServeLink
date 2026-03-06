@@ -842,7 +842,7 @@ class BookingDetailScreen extends StatelessWidget {
               Row(
                 children: [
                   const Text(
-                    "Booking History",
+                    "Status History",
                     style: TextStyle(fontWeight: FontWeight.w900, fontSize: 18),
                   ),
                   const Spacer(),
@@ -1219,6 +1219,9 @@ class _MainCard extends StatelessWidget {
                               builder: (_) => ProviderProfileScreen(
                                 providerId: booking.providerId,
                                 nav: nav,
+                                seekerLat: booking.locationLat,
+                                seekerLng: booking.locationLng,
+                                seekerLabel: booking.locationText,
                               ),
                             ),
                           );
@@ -2014,10 +2017,18 @@ class ProviderProfileScreen extends StatelessWidget {
   final String providerId;
   final SeekerNavController nav;
 
+  // Booking address location
+  final double? seekerLat;
+  final double? seekerLng;
+  final String? seekerLabel;
+
   const ProviderProfileScreen({
     super.key,
     required this.providerId,
     required this.nav,
+    this.seekerLat,
+    this.seekerLng,
+    this.seekerLabel,
   });
 
   @override
@@ -2097,13 +2108,70 @@ class ProviderProfileScreen extends StatelessWidget {
                   if (lg is num) bizLng = lg.toDouble();
                 }
 
+                // NEW: Coverage schema
+                double? radiusKm;
+                double? covLat;
+                double? covLng;
+                String covLabel = "";
+
+                final sc = m['serviceCoverage'];
+                if (sc is Map) {
+                  final mm = sc.cast<String, dynamic>();
+                  final r = mm['radiusKm'];
+                  if (r is num) radiusKm = r.toDouble();
+
+                  final c = mm['center'];
+                  if (c is Map) {
+                    final cc = c.cast<String, dynamic>();
+                    final lt = cc['lat'];
+                    final lg = cc['lng'];
+                    if (lt is num) covLat = lt.toDouble();
+                    if (lg is num) covLng = lg.toDouble();
+                    covLabel = pickStrAny([cc['label'], cc['text']]);
+                  }
+                }
+
+                // Fallback to businessLat/businessLng (your new schema)
+                if (covLat == null || covLng == null) {
+                  final lt = m['businessLat'];
+                  final lg = m['businessLng'];
+                  if (lt is num) covLat = lt.toDouble();
+                  if (lg is num) covLng = lg.toDouble();
+                  if (covLabel.isEmpty) covLabel = pickStr(m['businessAddress']);
+                }
+
+                // Fallback to businessAddress map lat/lng if present
+                if ((covLat == null || covLng == null) && bizLat != null && bizLng != null) {
+                  covLat = bizLat;
+                  covLng = bizLng;
+                  if (covLabel.isEmpty) covLabel = businessText;
+                }
+
+                // If coverage label is still empty but we have a businessText, use it
+                if (covLabel.isEmpty && businessText.isNotEmpty) covLabel = businessText;
+
+                // Display service areas
                 final areas = (m['serviceAreas'] is List)
-                    ? (m['serviceAreas'] as List).map((e) => e.toString()).where((s) => s.trim().isNotEmpty).toList()
+                    ? (m['serviceAreas'] as List)
+                    .map((e) => e.toString())
+                    .where((s) => s.trim().isNotEmpty)
+                    .toList()
                     : <String>[];
 
                 final workingHoursRaw = (m['workingHours'] is Map)
                     ? (m['workingHours'] as Map).cast<String, dynamic>()
                     : <String, dynamic>{};
+
+                // Distance vs coverage (from booking/seeker location)
+                final canComputeDistance =
+                    seekerLat != null && seekerLng != null && covLat != null && covLng != null;
+                final distanceKm = canComputeDistance
+                    ? _haversineKm(seekerLat!, seekerLng!, covLat!, covLng!)
+                    : null;
+
+                final hasCoverageRadius = radiusKm != null && radiusKm! > 0;
+                final coverageKnown = hasCoverageRadius && distanceKm != null;
+                final isCovered = coverageKnown ? (distanceKm! <= radiusKm!) : null;
 
                 return Column(
                   children: [
@@ -2124,13 +2192,13 @@ class ProviderProfileScreen extends StatelessWidget {
                             },
                             onCall: phone.isEmpty ? null : () => _openTel(context, phone),
                             onEmail: email.isEmpty ? null : () => _openEmail(context, email),
-                            onMaps: (businessText.isEmpty && bizLat == null)
+                            onMaps: (covLabel.isEmpty && covLat == null)
                                 ? null
                                 : () {
-                              if (bizLat != null && bizLng != null) {
-                                _openGoogleMapsLatLng(context, bizLat!, bizLng!);
+                              if (covLat != null && covLng != null) {
+                                _openGoogleMapsLatLng(context, covLat!, covLng!);
                               } else {
-                                _openGoogleMapsQuery(context, businessText);
+                                _openGoogleMapsQuery(context, covLabel);
                               }
                             },
                           ),
@@ -2152,33 +2220,125 @@ class ProviderProfileScreen extends StatelessWidget {
 
                           const SizedBox(height: 12),
                           _InfoCard(
-                            title: "Business address",
-                            trailing: (businessText.isNotEmpty || (bizLat != null && bizLng != null))
+                            title: "Service coverage",
+                            trailing: (covLabel.isNotEmpty || (covLat != null && covLng != null))
                                 ? TextButton.icon(
                               onPressed: () {
-                                if (bizLat != null && bizLng != null) {
-                                  _openGoogleMapsLatLng(context, bizLat!, bizLng!);
+                                if (covLat != null && covLng != null) {
+                                  _openGoogleMapsLatLng(context, covLat!, covLng!);
                                 } else {
-                                  _openGoogleMapsQuery(context, businessText);
+                                  _openGoogleMapsQuery(context, covLabel);
                                 }
                               },
                               icon: const Icon(Icons.map_outlined, size: 18),
                               label: const Text("Open"),
                             )
                                 : null,
-                            child: Text(
-                              businessText.isEmpty ? "—" : businessText,
-                              style: const TextStyle(
-                                color: KLPalette.text2,
-                                fontWeight: FontWeight.w700,
-                                height: 1.35,
-                              ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    const Icon(Icons.social_distance, size: 18, color: KLPalette.text2),
+                                    const SizedBox(width: 8),
+                                    const Expanded(
+                                      child: Text(
+                                        "Coverage radius",
+                                        style: TextStyle(color: KLPalette.text2, fontWeight: FontWeight.w800),
+                                      ),
+                                    ),
+                                    _Pill(
+                                      text: hasCoverageRadius ? "${radiusKm!.toStringAsFixed(0)} km" : "—",
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 10),
+
+                                if (distanceKm != null) ...[
+                                  Row(
+                                    children: [
+                                      const Icon(Icons.pin_drop_outlined, size: 18, color: KLPalette.text2),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        child: Text(
+                                          "Distance from ${((seekerLabel ?? '').trim().isEmpty) ? "your address" : "booking address"}",
+                                          style: const TextStyle(
+                                            color: KLPalette.text2,
+                                            fontWeight: FontWeight.w800,
+                                          ),
+                                        ),
+                                      ),
+                                      Text(
+                                        "${distanceKm.toStringAsFixed(distanceKm < 10 ? 1 : 0)} km",
+                                        style: const TextStyle(fontWeight: FontWeight.w900),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 10),
+
+                                  if (coverageKnown) ...[
+                                    _CoverageStatusPill(
+                                      covered: isCovered == true,
+                                      label: isCovered == true ? "Covered" : "Outside coverage",
+                                    ),
+                                  ] else ...[
+                                    const Text(
+                                      "Coverage radius not set by provider.",
+                                      style: TextStyle(color: KLPalette.text2, fontWeight: FontWeight.w700),
+                                    ),
+                                  ],
+                                ] else ...[
+                                  const Text(
+                                    "Distance check unavailable (missing coordinates).",
+                                    style: TextStyle(color: KLPalette.text2, fontWeight: FontWeight.w700),
+                                  ),
+                                ],
+
+                                if (covLabel.trim().isNotEmpty) ...[
+                                  const SizedBox(height: 10),
+                                  Text(
+                                    covLabel.trim(),
+                                    style: const TextStyle(
+                                      color: KLPalette.text2,
+                                      fontWeight: FontWeight.w700,
+                                      height: 1.35,
+                                    ),
+                                  ),
+                                ],
+                              ],
                             ),
                           ),
 
                           const SizedBox(height: 12),
                           _InfoCard(
                             title: "Service areas",
+                            trailing: IconButton(
+                              icon: const Icon(Icons.info_outline_rounded),
+                              onPressed: () {
+                                showModalBottomSheet(
+                                  context: context,
+                                  backgroundColor: KLPalette.bg,
+                                  shape: const RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
+                                  ),
+                                  builder: (_) => Padding(
+                                    padding: const EdgeInsets.fromLTRB(20, 14, 20, 20),
+                                    child: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: const [
+                                        Text("About service areas", style: TextStyle(fontWeight: FontWeight.w900, fontSize: 18)),
+                                        SizedBox(height: 10),
+                                        Text(
+                                          "Service areas are for display only.\n\nCoverage eligibility is based on the provider’s coverage radius and distance from your booking address.",
+                                          textAlign: TextAlign.center,
+                                          style: TextStyle(color: KLPalette.text2, fontWeight: FontWeight.w700, height: 1.35),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
                             child: areas.isEmpty
                                 ? const Text(
                               "—",
@@ -2207,7 +2367,6 @@ class ProviderProfileScreen extends StatelessWidget {
         ),
       ),
 
-      // Sticky bottom: Chat (primary action)
       bottomNavigationBar: SafeArea(
         top: false,
         child: Padding(
@@ -2236,11 +2395,7 @@ class ProviderProfileScreen extends StatelessWidget {
     final url = Uri.parse("tel:$p");
     final ok = await launchUrl(url, mode: LaunchMode.externalApplication);
     if (!ok && context.mounted) {
-      AppSnack.show(
-        context,
-        "Unable to open dialer.",
-        type: AppSnackType.error,
-      );
+      AppSnack.show(context, "Unable to open dialer.", type: AppSnackType.error);
     }
   }
 
@@ -2252,11 +2407,7 @@ class ProviderProfileScreen extends StatelessWidget {
     );
     final ok = await launchUrl(url, mode: LaunchMode.externalApplication);
     if (!ok && context.mounted) {
-      AppSnack.show(
-        context,
-        "Unable to open email app.",
-        type: AppSnackType.error,
-      );
+      AppSnack.show(context, "Unable to open email app.", type: AppSnackType.error);
     }
   }
 
@@ -2265,11 +2416,7 @@ class ProviderProfileScreen extends StatelessWidget {
     final url = Uri.parse("https://www.google.com/maps/search/?api=1&query=$q");
     final ok = await launchUrl(url, mode: LaunchMode.externalApplication);
     if (!ok && context.mounted) {
-      AppSnack.show(
-        context,
-        "Unable to open Google Maps.",
-        type: AppSnackType.error,
-      );
+      AppSnack.show(context, "Unable to open Google Maps.", type: AppSnackType.error);
     }
   }
 
@@ -2277,12 +2424,42 @@ class ProviderProfileScreen extends StatelessWidget {
     final url = Uri.parse("https://www.google.com/maps/search/?api=1&query=$lat,$lng");
     final ok = await launchUrl(url, mode: LaunchMode.externalApplication);
     if (!ok && context.mounted) {
-      AppSnack.show(
-        context,
-        "Unable to open Google Maps.",
-        type: AppSnackType.error,
-      );
+      AppSnack.show(context, "Unable to open Google Maps.", type: AppSnackType.error);
     }
+  }
+}
+
+class _CoverageStatusPill extends StatelessWidget {
+  final bool covered;
+  final String label;
+
+  const _CoverageStatusPill({
+    required this.covered,
+    required this.label,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final bg = covered ? const Color(0xFFD1FAE5) : const Color(0xFFFEE2E2);
+    final fg = covered ? const Color(0xFF047857) : const Color(0xFFB91C1C);
+    final icon = covered ? Icons.check_circle_rounded : Icons.error_rounded;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: KLPalette.border),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 18, color: fg),
+          const SizedBox(width: 8),
+          Text(label, style: TextStyle(fontWeight: FontWeight.w900, color: fg)),
+        ],
+      ),
+    );
   }
 }
 
