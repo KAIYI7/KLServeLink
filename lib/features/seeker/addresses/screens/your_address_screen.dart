@@ -1,3 +1,5 @@
+import '../../../../core/utils/app_snack.dart';
+import '../../../../core/utils/kl_region_validator.dart';
 import '../data/address_firestore.dart';
 import 'package:flutter/material.dart';
 import '../../../../core/theme/theme.dart';
@@ -225,12 +227,19 @@ class _YourAddressScreenState extends State<YourAddressScreen> {
 
     if (result == null) return;
 
+    final check = await KlRegionValidator.validateLatLng(result.lat, result.lng);
+    if (!check.ok) {
+      if (!mounted) return;
+      AppSnack.show(context, check.message, type: AppSnackType.error);
+      return;
+    }
+
     setState(() {
       selected = selected.copyWith(
         lat: result.lat,
         lng: result.lng,
         geohash: result.geohash,
-        addressLine: (result.formattedAddress ?? selected.addressLine),
+        addressLine: check.formattedAddress ?? result.formattedAddress ?? selected.addressLine,
       );
     });
 

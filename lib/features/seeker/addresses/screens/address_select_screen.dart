@@ -1,4 +1,5 @@
 import '../../../../core/utils/app_snack.dart';
+import '../../../../core/utils/kl_region_validator.dart';
 import '../data/address_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:geocoding/geocoding.dart' as geo;
@@ -495,17 +496,11 @@ class _AddAddressSheetState extends State<_AddAddressSheet> {
 
       final lat = locs.first.latitude;
       final lng = locs.first.longitude;
-      final gh = GeoHash.encode(lat, lng, precision: 9);
 
       setState(() {
-        pinned = true;
-        _pickedLat = lat;
-        _pickedLng = lng;
-        _pickedGeohash = gh;
         _lastLatLng = LatLng(lat, lng);
       });
 
-      // Let user confirm/adjust on map
       final result = await Navigator.push<MapPickResult>(
         context,
         MaterialPageRoute(
@@ -515,6 +510,18 @@ class _AddAddressSheetState extends State<_AddAddressSheet> {
 
       if (result == null) return;
 
+      final check = await KlRegionValidator.validateLatLng(result.lat, result.lng);
+      if (!check.ok) {
+        if (!mounted) return;
+
+        AppSnack.show(
+          context,
+          check.message,
+          type: AppSnackType.error,
+        );
+        return;
+      }
+
       setState(() {
         pinned = true;
         _pickedLat = result.lat;
@@ -523,14 +530,21 @@ class _AddAddressSheetState extends State<_AddAddressSheet> {
         _lastLatLng = LatLng(result.lat, result.lng);
       });
 
-      if ((result.formattedAddress ?? "").trim().isNotEmpty) {
-        _addrCtrl.text = result.formattedAddress!.trim();
+      final addr = (check.formattedAddress ?? result.formattedAddress ?? "").trim();
+
+      if (addr.isNotEmpty) {
+        _addrCtrl.text = addr;
       } else {
         await _fillAddressFromPin(result.lat, result.lng);
       }
     } catch (_) {
       if (!mounted) return;
-      AppSnack.show(context, "Couldn’t locate that address. Try adding postcode/city.", type: AppSnackType.error);
+
+      AppSnack.show(
+        context,
+        "Couldn’t locate that address. Try adding postcode/city.",
+        type: AppSnackType.error,
+      );
     }
   }
 
@@ -797,21 +811,25 @@ class _AddAddressSheetState extends State<_AddAddressSheet> {
                         backgroundColor: KLPalette.primary,
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
                       ),
-                      onPressed: () {
+                      onPressed: () async {
                         if (!(_formKey.currentState?.validate() ?? false)) return;
         
                         if (!pinned || _pickedLat == null || _pickedLng == null || _pickedGeohash == null) {
                           AppSnack.show(context, "Please pinpoint your location on the map.", type: AppSnackType.error);
                           return;
                         }
-        
-                        final title = _labelCtrl.text.trim();
-                        final addr = _addrCtrl.text.trim();
-        
+
+                        final check = await KlRegionValidator.validateLatLng(_pickedLat!, _pickedLng!);
+                        if (!check.ok) {
+                          if (!mounted) return;
+                          AppSnack.show(context, check.message, type: AppSnackType.error);
+                          return;
+                        }
+
                         final created = AddressUiModel(
                           id: widget.initial?.id ?? "",
-                          title: title,
-                          addressLine: addr,
+                          title: _labelCtrl.text.trim(),
+                          addressLine: check.formattedAddress ?? _addrCtrl.text.trim(),
                           contactName: _nameCtrl.text.trim(),
                           contactPhone: _phoneCtrl.text.trim(),
                           addressType: type,

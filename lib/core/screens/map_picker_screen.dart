@@ -4,7 +4,9 @@ import 'package:geocoding/geocoding.dart' as geo;
 import 'package:geolocator/geolocator.dart';
 
 import '../theme/theme.dart';
+import '../utils/app_snack.dart';
 import '../utils/geohash.dart';
+import '../utils/kl_region_validator.dart';
 
 class MapPickResult {
   final double lat;
@@ -40,8 +42,11 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
   @override
   void initState() {
     super.initState();
-    if (widget.initial != null) _center = widget.initial!;
-    _tryMoveToUser();
+    if (widget.initial != null) {
+      _center = widget.initial!;
+    } else {
+      _tryMoveToUser();
+    }
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _resolveAddress(_center, force: true);
@@ -126,7 +131,18 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
     }
   }
 
-  void _confirm() {
+  void _confirm() async {
+    final check = await KlRegionValidator.validateLatLng(
+      _center.latitude,
+      _center.longitude,
+    );
+
+    if (!check.ok) {
+      if (!mounted) return;
+      AppSnack.show(context, check.message, type: AppSnackType.error);
+      return;
+    }
+
     final gh = GeoHash.encode(_center.latitude, _center.longitude, precision: 9);
     Navigator.pop(
       context,
@@ -134,13 +150,18 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
         lat: _center.latitude,
         lng: _center.longitude,
         geohash: gh,
-        formattedAddress: _prettyAddress,
+        formattedAddress: check.formattedAddress ?? _prettyAddress,
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    final outsideKl = !KlRegionValidator.isWithinKlBounds(
+      _center.latitude,
+      _center.longitude,
+    );
+
     return Scaffold(
       backgroundColor: KLPalette.bg,
       body: SafeArea(
@@ -217,12 +238,14 @@ class _MapPickerScreenState extends State<MapPickerScreen> {
                               const SizedBox(width: 12),
                               Expanded(
                                 child: Text(
-                                  _resolving
+                                  outsideKl
+                                      ? "This location is outside Kuala Lumpur.\nLat: ${_center.latitude.toStringAsFixed(5)}  Lng: ${_center.longitude.toStringAsFixed(5)}"
+                                      : _resolving
                                       ? "Looking up address...\nLat: ${_center.latitude.toStringAsFixed(5)}  Lng: ${_center.longitude.toStringAsFixed(5)}"
                                       : "${_prettyAddress ?? "Move the map to place the pin."}\nLat: ${_center.latitude.toStringAsFixed(5)}  Lng: ${_center.longitude.toStringAsFixed(5)}",
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                     fontWeight: FontWeight.w800,
-                                    color: KLPalette.text2,
+                                    color: outsideKl ? Colors.red : KLPalette.text2,
                                     height: 1.2,
                                   ),
                                 ),

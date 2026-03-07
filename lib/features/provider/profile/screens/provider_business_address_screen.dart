@@ -7,6 +7,7 @@ import '../../../../core/screens/map_picker_screen.dart';
 import 'package:geocoding/geocoding.dart' as geo;
 import '../../../../core/utils/app_snack.dart';
 import '../../../../core/utils/geohash.dart';
+import '../../../../core/utils/kl_region_validator.dart';
 
 class ProviderBusinessAddressScreen extends StatefulWidget {
   const ProviderBusinessAddressScreen({super.key});
@@ -80,6 +81,13 @@ class _ProviderBusinessAddressScreenState extends State<ProviderBusinessAddressS
       return;
     }
 
+    final check = await KlRegionValidator.validateLatLng(businessLat!, businessLng!);
+    if (!check.ok) {
+      if (!mounted) return;
+      AppSnack.show(context, check.message, type: AppSnackType.error);
+      return;
+    }
+
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
 
@@ -146,6 +154,13 @@ class _ProviderBusinessAddressScreenState extends State<ProviderBusinessAddressS
 
     if (result == null) return;
 
+    final check = await KlRegionValidator.validateLatLng(result.lat, result.lng);
+    if (!check.ok) {
+      if (!mounted) return;
+      AppSnack.show(context, check.message, type: AppSnackType.error);
+      return;
+    }
+
     setState(() {
       businessLat = result.lat;
       businessLng = result.lng;
@@ -190,6 +205,14 @@ class _ProviderBusinessAddressScreenState extends State<ProviderBusinessAddressS
       final loc = locations.first;
       final lat = loc.latitude;
       final lng = loc.longitude;
+
+      final check = await KlRegionValidator.validateLatLng(lat, lng);
+      if (!check.ok) {
+        if (!mounted) return;
+        AppSnack.show(context, check.message, type: AppSnackType.error);
+        return;
+      }
+
       final gh = GeoHash.encode(lat, lng, precision: 9);
 
       if (!mounted) return;
@@ -242,84 +265,87 @@ class _ProviderBusinessAddressScreenState extends State<ProviderBusinessAddressS
                     ),
                     child: loading
                         ? const Center(child: CircularProgressIndicator())
-                        : Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text("Address", style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16)),
-                        const SizedBox(height: 8),
-                        TextField(
-                          controller: ctrl,
-                          maxLines: 6,
-                          decoration: InputDecoration(
-                            hintText: "Enter your business address",
-                            prefixIcon: Icon(Icons.place_outlined),
-                            filled: true,
-                            fillColor: Colors.white,
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(12),
-                              borderSide: BorderSide(color: KLPalette.border),
-                            ),
-                            enabledBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(12),
-                              borderSide: BorderSide(color: KLPalette.border),
-                            ),
-                            focusedBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(12),
-                              borderSide: BorderSide(color: KLPalette.primary, width: 2),
-                            ),
-                          ),
-                        ),
-
-                        const SizedBox(height: 12),
-
-                        Row(
-                          children: [
-                            Expanded(
-                              child: SizedBox(
-                                height: 48,
-                                child: FilledButton.tonal(
-                                  onPressed: saving ? null : _pinFromAddress,
-                                  child: const Text("Auto Pin", textAlign: TextAlign.center,),),
-                                ),
+                        : SingleChildScrollView(
+                          keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+                          child: Column(
+                                                crossAxisAlignment: CrossAxisAlignment.start,
+                                                children: [
+                          const Text("Address", style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16)),
+                          const SizedBox(height: 8),
+                          TextField(
+                            controller: ctrl,
+                            maxLines: 6,
+                            decoration: InputDecoration(
+                              hintText: "Enter your business address",
+                              prefixIcon: Icon(Icons.place_outlined),
+                              filled: true,
+                              fillColor: Colors.white,
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(12),
+                                borderSide: BorderSide(color: KLPalette.border),
                               ),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: SizedBox(
-                                height: 48,
-                                child: FilledButton.tonal(
-                                  onPressed: saving ? null : _pickBusinessPin,
-                                  child: Text(pinned ? "Change Pin" : "Pick Pin"),
-                                ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(12),
+                                borderSide: BorderSide(color: KLPalette.border),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(12),
+                                borderSide: BorderSide(color: KLPalette.primary, width: 2),
                               ),
                             ),
-                          ],
-                        ),
-
-                        const SizedBox(height: 8),
-
-                        Text(
-                          pinned
-                              ? "Pinned • ${businessLat!.toStringAsFixed(5)}, ${businessLng!.toStringAsFixed(5)}"
-                              : "No pin yet",
-                          style: const TextStyle(fontWeight: FontWeight.w800, color: KLPalette.text2),
-                        ),
-
-                        const Spacer(),
-                        SizedBox(
-                          width: double.infinity,
-                          height: 56,
-                          child: FilledButton(
-                            onPressed: saving ? null : _save,
-                            child: saving
-                                ? const SizedBox(
-                              height: 22, width: 22,
-                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                            )
-                                : const Text("Save", style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16)),
                           ),
+                          
+                          const SizedBox(height: 12),
+                          
+                          Row(
+                            children: [
+                              Expanded(
+                                child: SizedBox(
+                                  height: 48,
+                                  child: FilledButton.tonal(
+                                    onPressed: saving ? null : _pinFromAddress,
+                                    child: const Text("Auto Pin", textAlign: TextAlign.center,),),
+                                  ),
+                                ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: SizedBox(
+                                  height: 48,
+                                  child: FilledButton.tonal(
+                                    onPressed: saving ? null : _pickBusinessPin,
+                                    child: Text(pinned ? "Change Pin" : "Pick Pin"),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          
+                          const SizedBox(height: 8),
+                          
+                          Text(
+                            pinned
+                                ? "Pinned • ${businessLat!.toStringAsFixed(5)}, ${businessLng!.toStringAsFixed(5)}"
+                                : "No pin yet",
+                            style: const TextStyle(fontWeight: FontWeight.w800, color: KLPalette.text2),
+                          ),
+
+                          const SizedBox(height: 24),
+                          SizedBox(
+                            width: double.infinity,
+                            height: 56,
+                            child: FilledButton(
+                              onPressed: saving ? null : _save,
+                              child: saving
+                                  ? const SizedBox(
+                                height: 22, width: 22,
+                                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                              )
+                                  : const Text("Save", style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16)),
+                            ),
+                          ),
+                                                ],
+                                              ),
                         ),
-                      ],
-                    ),
                   ),
                 ),
               ),

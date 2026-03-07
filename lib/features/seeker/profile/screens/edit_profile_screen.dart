@@ -189,7 +189,15 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
 
                           _LabeledField(label: "Full Name", controller: nameCtrl, icon: Icons.person_outline),
                           const SizedBox(height: 14),
-                          _LabeledField(label: "Email", controller: emailCtrl, icon: Icons.mail_outline),
+                          const Text("Email", style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16)),
+                          const SizedBox(height: 8),
+                          TextField(
+                            enabled: false,
+                            controller: TextEditingController(text: emailCtrl.text),
+                            decoration: const InputDecoration(
+                              prefixIcon: Icon(Icons.mail_outline),
+                            ),
+                          ),
                           const SizedBox(height: 14),
                           _LabeledField(label: "Date of Birth", controller: dobCtrl, icon: Icons.calendar_month_outlined),
                           const SizedBox(height: 14),

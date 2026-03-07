@@ -212,7 +212,12 @@ class _ProviderServiceAreasScreenState extends State<ProviderServiceAreasScreen>
         backgroundColor: KLPalette.bg,
         body: SafeArea(
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 10, 20, 18),
+            padding: EdgeInsets.fromLTRB(
+              20,
+              10,
+              20,
+              18 + MediaQuery.of(context).viewInsets.bottom,
+            ),
             child: Column(
               children: [
                 _TopBar(
@@ -237,192 +242,196 @@ class _ProviderServiceAreasScreenState extends State<ProviderServiceAreasScreen>
                       ),
                       child: loading
                           ? const Center(child: CircularProgressIndicator())
-                          : Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          // ===== Coverage section =====
-                          const Text(
-                            "Coverage radius",
-                            style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            "Used to decide whether a booking is within your service distance.",
-                            style: TextStyle(color: KLPalette.text2, fontWeight: FontWeight.w700),
-                          ),
-                          const SizedBox(height: 10),
-
-                          Wrap(
-                            spacing: 10,
-                            runSpacing: 10,
-                            children: [5, 10, 20, 30].map((v) {
-                              final selected = radiusKm.round() == v;
-                              return InkWell(
-                                borderRadius: BorderRadius.circular(999),
-                                onTap: () {
-                                  setState(() {
-                                    radiusKm = v.toDouble();
-                                    dirty = true;
-                                  });
-                                },
-                                child: Container(
+                          : SingleChildScrollView (
+                            keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+                            child: Column(
+                                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                                    children: [
+                            // ===== Coverage section =====
+                            const Text(
+                              "Coverage radius",
+                              style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              "Used to decide whether a booking is within your service distance.",
+                              style: TextStyle(color: KLPalette.text2, fontWeight: FontWeight.w700),
+                            ),
+                            const SizedBox(height: 10),
+                            
+                            Wrap(
+                              spacing: 10,
+                              runSpacing: 10,
+                              children: [5, 10, 20, 30].map((v) {
+                                final selected = radiusKm.round() == v;
+                                return InkWell(
+                                  borderRadius: BorderRadius.circular(999),
+                                  onTap: () {
+                                    setState(() {
+                                      radiusKm = v.toDouble();
+                                      dirty = true;
+                                    });
+                                  },
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                    decoration: BoxDecoration(
+                                      color: selected ? KLPalette.primary : KLPalette.tint50,
+                                      borderRadius: BorderRadius.circular(999),
+                                      border: Border.all(color: KLPalette.border),
+                                    ),
+                                    child: Text(
+                                      "$v km",
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.w900,
+                                        color: selected ? Colors.white : KLPalette.primary700,
+                                      ),
+                                    ),
+                                  ),
+                                );
+                              }).toList(),
+                            ),
+                            
+                            const SizedBox(height: 10),
+                            
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: Slider(
+                                    value: radiusKm.clamp(1, 50),
+                                    min: 1,
+                                    max: 50,
+                                    divisions: 49,
+                                    onChanged: (v) {
+                                      setState(() => radiusKm = v);
+                                      _setDirty();
+                                    },
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                                   decoration: BoxDecoration(
-                                    color: selected ? KLPalette.primary : KLPalette.tint50,
+                                    color: KLPalette.tint50,
                                     borderRadius: BorderRadius.circular(999),
                                     border: Border.all(color: KLPalette.border),
                                   ),
                                   child: Text(
-                                    "$v km",
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.w900,
-                                      color: selected ? Colors.white : KLPalette.primary700,
+                                    "${radiusKm.toStringAsFixed(0)} km",
+                                    style: const TextStyle(fontWeight: FontWeight.w900),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            
+                            const SizedBox(height: 12),
+                            _InlineInfo(
+                              icon: Icons.place_outlined,
+                              text: (centerLat != null && centerLng != null)
+                                  ? "Coverage center: ${centerLabel.isNotEmpty ? centerLabel : "business location"}"
+                                  : "Coverage center not set (will still save radius). Add business address coordinates for best results.",
+                            ),
+                            
+                            const SizedBox(height: 16),
+                            const Divider(height: 1, color: KLPalette.border),
+                            const SizedBox(height: 14),
+                            
+                            // ===== Areas section =====
+                            Row(
+                              children: [
+                                const Text(
+                                  "Service areas",
+                                  style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
+                                ),
+                                const Spacer(),
+                                Text(
+                                  "${areas.length}",
+                                  style: const TextStyle(fontWeight: FontWeight.w900, color: KLPalette.text2),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              "Shown on your provider profile (e.g. Cheras, Bangsar).",
+                              style: TextStyle(color: KLPalette.text2, fontWeight: FontWeight.w700),
+                            ),
+                            const SizedBox(height: 10),
+                            
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: TextField(
+                                    controller: inputCtrl,
+                                    decoration: const InputDecoration(
+                                      hintText: "Type area name",
+                                      prefixIcon: Icon(Icons.map_outlined),
+                                    ),
+                                    onSubmitted: (_) => _addArea(),
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                FilledButton(
+                                  onPressed: _addArea,
+                                  style: FilledButton.styleFrom(
+                                    minimumSize: const Size(56, 56),
+                                    padding: EdgeInsets.zero,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(16),
                                     ),
                                   ),
+                                  child: const Icon(Icons.add),
                                 ),
-                              );
-                            }).toList(),
-                          ),
-
-                          const SizedBox(height: 10),
-
-                          Row(
-                            children: [
-                              Expanded(
-                                child: Slider(
-                                  value: radiusKm.clamp(1, 50),
-                                  min: 1,
-                                  max: 50,
-                                  divisions: 49,
-                                  onChanged: (v) {
-                                    setState(() => radiusKm = v);
-                                    _setDirty();
-                                  },
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                                decoration: BoxDecoration(
-                                  color: KLPalette.tint50,
-                                  borderRadius: BorderRadius.circular(999),
-                                  border: Border.all(color: KLPalette.border),
-                                ),
+                              ],
+                            ),
+                            
+                            const SizedBox(height: 14),
+                            
+                            // Chips list (scrollable)
+                            SizedBox(
+                              height: 170,
+                              child: areas.isEmpty
+                                  ? Center(
                                 child: Text(
-                                  "${radiusKm.toStringAsFixed(0)} km",
-                                  style: const TextStyle(fontWeight: FontWeight.w900),
+                                  "No areas added yet.",
+                                  style: TextStyle(color: KLPalette.text2, fontWeight: FontWeight.w800),
                                 ),
-                              ),
-                            ],
-                          ),
-
-                          const SizedBox(height: 12),
-                          _InlineInfo(
-                            icon: Icons.place_outlined,
-                            text: (centerLat != null && centerLng != null)
-                                ? "Coverage center: ${centerLabel.isNotEmpty ? centerLabel : "business location"}"
-                                : "Coverage center not set (will still save radius). Add business address coordinates for best results.",
-                          ),
-
-                          const SizedBox(height: 16),
-                          const Divider(height: 1, color: KLPalette.border),
-                          const SizedBox(height: 14),
-
-                          // ===== Areas section =====
-                          Row(
-                            children: [
-                              const Text(
-                                "Service areas",
-                                style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
-                              ),
-                              const Spacer(),
-                              Text(
-                                "${areas.length}",
-                                style: const TextStyle(fontWeight: FontWeight.w900, color: KLPalette.text2),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            "Shown on your provider profile (e.g. Cheras, Bangsar).",
-                            style: TextStyle(color: KLPalette.text2, fontWeight: FontWeight.w700),
-                          ),
-                          const SizedBox(height: 10),
-
-                          Row(
-                            children: [
-                              Expanded(
-                                child: TextField(
-                                  controller: inputCtrl,
-                                  decoration: const InputDecoration(
-                                    hintText: "Type area name",
-                                    prefixIcon: Icon(Icons.map_outlined),
-                                  ),
-                                  onSubmitted: (_) => _addArea(),
-                                ),
-                              ),
-                              const SizedBox(width: 10),
-                              FilledButton(
-                                onPressed: _addArea,
-                                style: FilledButton.styleFrom(
-                                  minimumSize: const Size(56, 56),
-                                  padding: EdgeInsets.zero,
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(16),
-                                  ),
-                                ),
-                                child: const Icon(Icons.add),
-                              ),
-                            ],
-                          ),
-
-                          const SizedBox(height: 14),
-
-                          // Chips list (scrollable)
-                          Expanded(
-                            child: areas.isEmpty
-                                ? Center(
-                              child: Text(
-                                "No areas added yet.",
-                                style: TextStyle(color: KLPalette.text2, fontWeight: FontWeight.w800),
-                              ),
-                            )
-                                : SingleChildScrollView(
-                              padding: const EdgeInsets.only(top: 8, bottom: 8),
-                              child: Wrap(
-                                spacing: 10,
-                                runSpacing: 10,
-                                children: areas.map((a) {
-                                  return Chip(
-                                    label: Text(a, style: const TextStyle(fontWeight: FontWeight.w900)),
-                                    deleteIcon: const Icon(Icons.close),
-                                    onDeleted: () => _removeArea(a),
-                                  );
-                                }).toList(),
-                              ),
-                            ),
-                          ),
-
-                          const SizedBox(height: 12),
-                          SizedBox(
-                            width: double.infinity,
-                            height: 56,
-                            child: FilledButton(
-                              onPressed: saving ? null : _save,
-                              child: saving
-                                  ? const SizedBox(
-                                height: 22,
-                                width: 22,
-                                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                               )
-                                  : const Text(
-                                "Save",
-                                style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
+                                  : SingleChildScrollView(
+                                padding: const EdgeInsets.only(top: 8, bottom: 8),
+                                child: Wrap(
+                                  spacing: 10,
+                                  runSpacing: 10,
+                                  children: areas.map((a) {
+                                    return Chip(
+                                      label: Text(a, style: const TextStyle(fontWeight: FontWeight.w900)),
+                                      deleteIcon: const Icon(Icons.close),
+                                      onDeleted: () => _removeArea(a),
+                                    );
+                                  }).toList(),
+                                ),
                               ),
                             ),
+                            
+                            const SizedBox(height: 12),
+                            SizedBox(
+                              width: double.infinity,
+                              height: 56,
+                              child: FilledButton(
+                                onPressed: saving ? null : _save,
+                                child: saving
+                                    ? const SizedBox(
+                                  height: 22,
+                                  width: 22,
+                                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                )
+                                    : const Text(
+                                  "Save",
+                                  style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
+                                ),
+                              ),
+                            ),
+                                                    ],
+                                                  ),
                           ),
-                        ],
-                      ),
                     ),
                   ),
                 ),
