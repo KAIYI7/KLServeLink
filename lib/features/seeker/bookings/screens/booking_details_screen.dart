@@ -2093,17 +2093,19 @@ class BookingSummaryScreen extends StatelessWidget {
                     //   ),
                     // );
 
-                    Navigator.push(
-                      context,
+                    nav.goBookings(BookingsFilter.upcoming);
+
+                    Navigator.of(context).pushAndRemoveUntil(
                       MaterialPageRoute(
                         builder: (_) => BookingDetailScreen(
                           bookingId: bookingId,
                           nav: nav,
                         ),
                       ),
+                          (route) => route.isFirst,
                     );
                   } else if (action == _BookingSuccessAction.messageWorkers) {
-                    nav.goChat();
+                    nav.goChatWith(service.providerId);
                     Navigator.of(context).popUntil((route) => route.isFirst);
                   } else {
                     nav.goBookings();

@@ -1571,6 +1571,7 @@ class _FullSearchMapScreenState extends State<FullSearchMapScreen> {
               myLocationButtonEnabled: true,
               zoomControlsEnabled: true,
               compassEnabled: true,
+              padding: const EdgeInsets.fromLTRB(12, 80, 12, 110),
               markers: _buildMarkers(),
               onMapCreated: (c) {
                 _c = c;
@@ -1628,7 +1629,7 @@ class _FullSearchMapScreenState extends State<FullSearchMapScreen> {
 
             Positioned(
               left: 12,
-              bottom: 84,
+              bottom: 96,
               child: _MapLegend(
                 showMePin: widget.myLocation != null,
                 showGpsDot: true,
