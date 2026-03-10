@@ -2212,9 +2212,8 @@ class _HeuristicOppPreviewList extends StatelessWidget {
 
         if (counts.isEmpty) {
           return Text(
-            hasWhFilter
-                ? "Not enough data yet within your Working Hours. Complete more bookings to generate insights."
-                : "Not enough data yet. Complete more bookings to generate insights.",
+              hasWhFilter ? "Opportunity insights are generated daily. Your insights within Working Hours will appear after today's update at 23:59."
+            : "Opportunity insights are generated daily. Your insights will appear after today's update at 23:59.",
             style: const TextStyle(color: KLPalette.text2, fontWeight: FontWeight.w700),
           );
         }
@@ -2231,7 +2230,7 @@ class _HeuristicOppPreviewList extends StatelessWidget {
 
           final allowedHours = hasWhFilter
               ? (availability[wd] ?? const <int>[])
-              : List.generate(24, (h) => h);
+              : const <int>[];
 
           if (allowedHours.isEmpty) continue; // closed day
 
@@ -2504,7 +2503,7 @@ class _HighOppDrilldownList extends StatelessWidget {
                 border: Border.all(color: KLPalette.border),
               ),
               child: const Text(
-                "AI forecast not available yet (needs enough booking history). Showing heuristic based on past booking frequency.",
+                "Opportunity insights are generated daily. Your insights will appear after today's forecast run at 23:59. Showing heuristic based on past booking frequency meanwhile.",
                 style: TextStyle(color: KLPalette.text2, fontWeight: FontWeight.w800),
               ),
             ),
@@ -2518,7 +2517,7 @@ class _HighOppDrilldownList extends StatelessWidget {
 
         final hours = hasWhFilter
             ? (availability[wd] ?? const <int>[])
-            : List.generate(24, (h) => h);
+            : const <int>[];
 
         final ranked = hours
             .map((h) => MapEntry(h, countsByHow[wd * 100 + h] ?? 0))
@@ -2587,8 +2586,10 @@ class _HighOppDrilldownList extends StatelessWidget {
                   ),
 
                 const SizedBox(height: 10),
-                const Text(
-                  "Heuristic: ranked by past booking frequency, filtered by working hours when available.",
+                Text(
+                  hasWhFilter
+                      ? "Showing heuristic based on past booking frequency, filtered by working hours when available."
+                      : "Showing heuristic based on past booking frequency.",
                   style: TextStyle(
                     color: KLPalette.text2,
                     fontWeight: FontWeight.w700,

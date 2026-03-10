@@ -702,14 +702,14 @@ class _ProviderServiceAnalyticsScreenState
                             const SizedBox(height: 12),
 
                             _Card(
-                              title: "Peak booking hours",
+                              title: "Opportunity Insights",
                               subtitle: (aiSlots.isNotEmpty)
                                   ? (workingHoursRaw.isEmpty
                                         ? "AI forecast • Next 7 days"
                                         : "AI forecast (filtered by Working Hours) • Next 7 days")
                                   : (workingHoursRaw.isEmpty
-                                        ? "Top slots • Last $_rangeDays days"
-                                        : "Filtered by Working Hours • Last $_rangeDays days"),
+                                        ? "Insights will appear after today's forecast run"
+                                        : "Filtered by Working Hours • Insights will appear after today's forecast run"),
                               child: (aiSlots.isNotEmpty)
                                   ? _AiPeakHours(
                                       slots: aiSlots,
@@ -853,7 +853,7 @@ class _PeakHours extends StatelessWidget {
   Widget build(BuildContext context) {
     if (howCounts.isEmpty) {
       return const Text(
-        "Not enough data yet for peak hours.",
+        "Opportunity insights are generated daily. Your forecasted slots will appear after today's update at 23:59.",
         style: TextStyle(color: KLPalette.text2, fontWeight: FontWeight.w700),
       );
     }
@@ -947,7 +947,7 @@ class _AiPeakHours extends StatelessWidget {
 
     if (horizonAll.isEmpty) {
       return const Text(
-          "AI forecast exists but no slots in the next 7 days.",
+        "Opportunity insights are generated daily. Your forecasted slots for the next 7 days will appear after today's update at 23:59.",
         style: TextStyle(color: KLPalette.text2, fontWeight: FontWeight.w700),
       );
     }

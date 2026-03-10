@@ -288,9 +288,6 @@ class _HighOpportunityCard extends StatelessWidget {
                       "Working Hours awareness:\n"
                       "• Normal (primary color) rows are within your Working Hours.\n"
                       "• Highlighted (amber) rows are strong opportunities outside your Working Hours — consider expanding availability to capture them.\n\n"
-                      "AI vs heuristic mode:\n"
-                      "• If AI forecast exists, the list is based on the platform opportunity_index slots.\n"
-                      "• If not, the fallback uses your past booking history to estimate strong hours.\n\n"
                       "How this differs from the AI prediction inside a service detail screen:\n"
                       "• This Insights tab is provider-level (overall demand/opportunity).\n"
                       "• Service detail AI prediction is service-level and often estimates potential using "
@@ -616,8 +613,8 @@ class _HeuristicOppBars extends StatelessWidget {
         if (top.isEmpty || top.every((e) => e.value == 0)) {
           return Text(
             hasWorkingHours
-                ? "Not enough data yet within your Working Hours. Complete more bookings to generate insights."
-                : "Not enough data yet. Complete more bookings to generate insights.",
+                ? "Opportunity insights are generated daily. Your insights within Working Hours will appear after today's update at 23:59."
+                : "Opportunity insights are generated daily. Your insights will appear after today's update at 23:59.",
             style: const TextStyle(
                 color: KLPalette.text2, fontWeight: FontWeight.w700),
           );

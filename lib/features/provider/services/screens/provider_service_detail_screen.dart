@@ -1366,8 +1366,10 @@ class ProviderServiceInsightsMini extends StatelessWidget {
                             : const <Map<String, dynamic>>[];
 
                         if (slotsList.isEmpty) {
-                          return const Text(
-                            "AI forecast not available yet. (Waiting for enough data)",
+                          return Text(
+                            hasWhFilter
+                                ? "Opportunity insights are generated daily. Your insights within Working Hours will appear after today's forecast run at 23:59."
+                                : "Opportunity insights are generated daily. Your insights will appear after today's forecast run at 23:59.",
                             style: TextStyle(color: KLPalette.text2, fontWeight: FontWeight.w700),
                           );
                         }
