@@ -340,7 +340,8 @@ class _StatsGrid extends StatelessWidget {
 
     final servicesQ = FirebaseFirestore.instance
         .collection('services')
-        .where('providerId', isEqualTo: uid);
+        .where('providerId', isEqualTo: uid)
+        .where('isDeleted', isEqualTo: false);
 
     return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
       stream: bookingsQ.snapshots(),
