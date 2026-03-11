@@ -233,7 +233,7 @@ class _ProviderProfileTabState extends State<ProviderProfileTab> {
 
               _SettingRow(
                 icon: Icons.account_balance_outlined,
-                title: "Payout / Bank Info",
+                title: "Payout",
                 onTap: () {
                   Navigator.push(context, MaterialPageRoute(builder: (_) => const ProviderPayoutScreen()));
                 },
@@ -251,7 +251,7 @@ class _ProviderProfileTabState extends State<ProviderProfileTab> {
               const SizedBox(height: 12),
               _SettingRow(
                 icon: Icons.logout_rounded,
-                title: "Logout",
+                title: "Log out",
                 danger: true,
                 onTap: () => _showLogoutDialog(context),
               ),
@@ -276,7 +276,7 @@ class _ProviderProfileTabState extends State<ProviderProfileTab> {
         if (!mounted) return;
         AppSnack.show(
           context,
-          "Logout failed. Please try again.",
+          "Log out failed. Please try again.",
           type: AppSnackType.error,
         );
       }
@@ -452,7 +452,7 @@ class _LogoutDialog extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             const Text(
-              "Logout?",
+              "Log out?",
               style: TextStyle(
                 color: Color(0xFFEF4444),
                 fontWeight: FontWeight.w900,
@@ -461,7 +461,7 @@ class _LogoutDialog extends StatelessWidget {
             ),
             const SizedBox(height: 10),
             const Text(
-              "Are you sure to want logout?",
+              "Are you sure to want log out?",
               textAlign: TextAlign.center,
               style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
             ),
@@ -492,7 +492,7 @@ class _LogoutDialog extends StatelessWidget {
                         backgroundColor: KLPalette.primary,
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
                       ),
-                      child: const Text("Logout",
+                      child: const Text("Log out",
                           style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16)),
                     ),
                   ),

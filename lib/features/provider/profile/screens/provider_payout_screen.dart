@@ -177,6 +177,7 @@ class _ProviderPayoutScreenState extends State<ProviderPayoutScreen> {
       backgroundColor: KLPalette.bg,
       appBar: AppBar(
         title: const Text('Payout'),
+        centerTitle: true,
         backgroundColor: KLPalette.bg,
         elevation: 0,
       ),
