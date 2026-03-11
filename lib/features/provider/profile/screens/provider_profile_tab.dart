@@ -224,7 +224,7 @@ class _ProviderProfileTabState extends State<ProviderProfileTab> {
 
               _SettingRow(
                 icon: Icons.map_outlined,
-                title: "Service Areas",
+                title: "Service Coverage",
                 onTap: () {
                   Navigator.push(context, MaterialPageRoute(builder: (_) => const ProviderServiceAreasScreen()));
                 },
