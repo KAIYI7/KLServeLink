@@ -81,7 +81,10 @@ class _SearchScreenState extends State<SearchScreen> {
       }
 
       final pos = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
+        // desiredAccuracy: LocationAccuracy.high,
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+        ),
       );
 
       setState(() {
@@ -165,7 +168,7 @@ class _SearchScreenState extends State<SearchScreen> {
       builder: (context, centerSnap) {
         final mainCenter = centerSnap.data;
 
-        // Priority: main address -> GPS -> demo
+        // Priority: main address -> GPS -> demo center
         final effectiveCenter = mainCenter ?? _myLocation ?? userCenter;
 
         return Scaffold(
