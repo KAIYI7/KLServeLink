@@ -150,6 +150,7 @@ class BookingDetailScreen extends StatelessWidget {
     }
     // Card
     if (s == "unpaid") return "Awaiting payment";
+    if (s == "held_due_to_dispute") return "On hold (dispute)";
     if (s.contains("refund")) return "Refunded";
     if (s.contains("author") || s.contains("hold")) return "Deposit authorized";
     if (s.contains("captur")) return "Captured";
@@ -247,8 +248,16 @@ class BookingDetailScreen extends StatelessWidget {
           state: payState,
           bookingStatus: booking.status,
         );
+        final hasOpenDispute = _hasOpenDispute(raw);
+
+        final reviewBlockedByDispute =
+            booking.status == BookingStatus.completed && hasOpenDispute;
+
         final needsSeekerConfirm =
-            booking.status == BookingStatus.completed && _isCard(payMethod) && _needsSeekerConfirm(payState);
+            booking.status == BookingStatus.completed &&
+                _isCard(payMethod) &&
+                _needsSeekerConfirm(payState) &&
+                !hasOpenDispute;
 
         final timeText = _formatBookingTime(booking.scheduledAt);
         final isUpcoming = booking.status == BookingStatus.upcoming;
@@ -430,6 +439,12 @@ class BookingDetailScreen extends StatelessWidget {
                                   context,
                                   booking.id,
                                 );
+                              } else if (reviewBlockedByDispute) {
+                                AppSnack.show(
+                                  context,
+                                  "A dispute is currently open for this booking. Please wait until it is resolved.",
+                                  type: AppSnackType.info,
+                                );
                               } else {
                                 if (isReviewed) {
                                   AppSnack.show(
@@ -463,7 +478,9 @@ class BookingDetailScreen extends StatelessWidget {
                                   ? 'Cancel Booking'
                                   : (needsSeekerConfirm
                                   ? 'Confirm Completed'
-                                  : (isReviewed ? 'Reviewed' : 'Leave a Review')),
+                                  : (reviewBlockedByDispute
+                                  ? 'Dispute Opened'
+                                  : (isReviewed ? 'Reviewed' : 'Leave a Review'))),
                               style: const TextStyle(
                                 fontWeight: FontWeight.w900,
                                 fontSize: 14,
@@ -524,9 +541,270 @@ class BookingDetailScreen extends StatelessWidget {
                       ),
                     ],
                   ),
+
+                  if (needsSeekerConfirm) ...[
+                    const SizedBox(height: 6),
+                    const Text(
+                      "If there was a problem with the service",
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: KLPalette.text2,
+                        fontWeight: FontWeight.w600,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                    Center(
+                      child: TextButton(
+                        onPressed: () async {
+                          final result = await _showDisputeSheet(context);
+                          if (result == null) return;
+
+                          final reason = result["reason"]!;
+                          final note = result["note"] ?? "";
+
+                          showDialog<void>(
+                            context: context,
+                            barrierDismissible: false,
+                            builder: (_) => const Center(child: CircularProgressIndicator()),
+                          );
+
+                          try {
+                            final callable =
+                            FirebaseFunctions.instance.httpsCallable('raiseCompletionDispute');
+
+                            await callable.call({
+                              "bookingId": bookingId,
+                              "reason": reason,
+                              "note": note,
+                            });
+
+                            if (!context.mounted) return;
+
+                            Navigator.of(context, rootNavigator: true).pop();
+
+                            AppSnack.show(
+                              context,
+                              "Your dispute has been submitted. Payment is on hold and the case will be auto-resolved after 24 hours based on the selected reason.",
+                              type: AppSnackType.info,
+                            );
+                          } catch (_) {
+                            if (Navigator.of(context, rootNavigator: true).canPop()) {
+                              Navigator.of(context, rootNavigator: true).pop();
+                            }
+
+                            AppSnack.show(
+                              context,
+                              "Failed to submit dispute.",
+                              type: AppSnackType.error,
+                            );
+                          }
+                        },
+                        child: const Text(
+                          "Report issue instead",
+                          style: TextStyle(
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFFDC2626),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+
+                  if (hasOpenDispute) ...[
+                    const SizedBox(height: 10),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFFF7ED),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: const Color(0xFFF59E0B)),
+                      ),
+                      child: const Text(
+                        "A dispute is currently open for this booking. Payment is temporarily on hold while the case waits for resolution.",
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFF9A3412),
+                        ),
+                      ),
+                    ),
+                  ]
                 ],
               ),
             ),
+          ),
+        );
+      },
+    );
+  }
+
+  Future<Map<String, String>?> _showDisputeSheet(BuildContext context) {
+    const reasons = {
+      "service_not_completed": "Service was not completed",
+      "provider_no_show": "Provider did not arrive",
+      "provider_refused_service": "Provider refused to perform the service",
+      "unsafe_or_inappropriate_behavior": "Unsafe or inappropriate behavior",
+      "service_quality_poor": "Service quality was poor",
+      "service_not_as_described": "Service not as described",
+      "provider_significantly_late": "Provider arrived very late",
+      "other": "Other",
+    };
+
+    String? selectedKey;
+    final noteController = TextEditingController();
+
+    return showModalBottomSheet<Map<String, String>>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (_) {
+        return SafeArea(
+          top: false,
+          child: StatefulBuilder(
+            builder: (context, setSheetState) {
+              final canSubmit = selectedKey != null && (selectedKey != "other" || noteController.text.trim().isNotEmpty);
+
+              return Container(
+                decoration: const BoxDecoration(
+                  color: KLPalette.bg,
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
+                ),
+                padding: EdgeInsets.fromLTRB(20, 14, 20, MediaQuery.of(context).viewInsets.bottom + 18,),
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Row(
+                        children: [
+                          const Spacer(),
+                          const Text(
+                            "Report Issue",
+                            style: TextStyle(
+                              fontWeight: FontWeight.w900,
+                              fontSize: 22,
+                              color: Color(0xFFDC2626),
+                            ),
+                          ),
+                          const Spacer(),
+                          IconButton(
+                            onPressed: () => Navigator.pop(context, null),
+                            icon: const Icon(Icons.close),
+                          ),
+                        ],
+                      ),
+                  
+                      const Divider(height: 1),
+                  
+                      const SizedBox(height: 18),
+                  
+                      const Text(
+                        "What went wrong with the service?",
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontWeight: FontWeight.w900,
+                          fontSize: 20,
+                        ),
+                      ),
+                  
+                      const SizedBox(height: 18),
+                  
+                      // Reasons
+                      ...reasons.entries.map((entry) {
+                        return RadioListTile<String>(
+                          value: entry.key,
+                          groupValue: selectedKey,
+                          activeColor: KLPalette.primary,
+                          title: Text(
+                            entry.value,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          onChanged: (value) {
+                            setSheetState(() {
+                              selectedKey = value;
+                            });
+                          },
+                        );
+                      }),
+                  
+                      if (selectedKey == "other") ...[
+                        const SizedBox(height: 10),
+                        TextField(
+                          controller: noteController,
+                          decoration: const InputDecoration(
+                            hintText: "Please describe the issue",
+                            border: OutlineInputBorder(),
+                          ),
+                          maxLines: 3,
+                          onChanged: (_) => setSheetState(() {}),
+                        ),
+                      ],
+                  
+                      const SizedBox(height: 14),
+                  
+                      const Divider(height: 1),
+                  
+                      const SizedBox(height: 14),
+                  
+                      Row(
+                        children: [
+                          Expanded(
+                            child: SizedBox(
+                              height: 56,
+                              child: FilledButton(
+                                style: FilledButton.styleFrom(
+                                  backgroundColor: KLPalette.tint100,
+                                  foregroundColor: KLPalette.text,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(999),
+                                  ),
+                                ),
+                                onPressed: () => Navigator.pop(context, null),
+                                child: const Text(
+                                  "Cancel",
+                                  style: TextStyle(fontWeight: FontWeight.w900),
+                                ),
+                              ),
+                            ),
+                          ),
+                  
+                          const SizedBox(width: 12),
+                  
+                          Expanded(
+                            child: SizedBox(
+                              height: 56,
+                              child: FilledButton(
+                                style: FilledButton.styleFrom(
+                                  backgroundColor: const Color(0xFFDC2626),
+                                  disabledBackgroundColor: KLPalette.tint200,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(999),
+                                  ),
+                                ),
+                                onPressed: canSubmit
+                                    ? () {
+                                  Navigator.pop(context, {
+                                    "reason": selectedKey!,
+                                    "note": noteController.text.trim(),
+                                  });
+                                }
+                                    : null,
+                                child: const Text(
+                                  "Submit Dispute",
+                                  style: TextStyle(fontWeight: FontWeight.w900),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
           ),
         );
       },
@@ -967,6 +1245,17 @@ class BookingDetailScreen extends StatelessWidget {
       return "Receipt will be available after the provider confirms cash received.";
     }
     return "Receipt will be available after payment is completed.";
+  }
+
+  Map<String, dynamic> _disputeMap(Map<String, dynamic> d) {
+    final x = d["dispute"];
+    if (x is Map) return Map<String, dynamic>.from(x as Map);
+    return <String, dynamic>{};
+  }
+
+  bool _hasOpenDispute(Map<String, dynamic> d) {
+    final dispute = _disputeMap(d);
+    return (dispute["state"] ?? "").toString().toLowerCase() == "open";
   }
 }
 

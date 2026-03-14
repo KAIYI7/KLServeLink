@@ -7,7 +7,7 @@ This folder deploys a **Cloud Run** service that runs your AI batch jobs **on-de
 - **Module B (Forecasting):** writes `users/{providerId}/opportunity_index.slots` (Top future slots with score)
 - **Module C (Review Analysis):** writes `services/{serviceId}.sentiment_score` and `services/{serviceId}.top_keywords`
 
-## Firestore required fields (based on your current schema)
+## Firestore required fields
 - `bookings`: `serviceId`, `providerId`, `scheduledAt` (Timestamp), `seekerId`, `totalAmount`
 - `services`: `category`, `pricingRules`, `ratingAvg`, plus review subcollection `services/{serviceId}/reviews`
 
@@ -19,8 +19,7 @@ This folder deploys a **Cloud Run** service that runs your AI batch jobs **on-de
 
 Each endpoint returns a small JSON summary.
 
-## Authentication (important)
-For FYP demo, easiest is:
+## Authentication
 - Deploy Cloud Run with **"Allow unauthenticated" OFF**
 - Use an **OIDC authenticated** Cloud Scheduler job to call the endpoint.
 

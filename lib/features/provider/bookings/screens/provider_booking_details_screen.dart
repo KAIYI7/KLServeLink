@@ -584,7 +584,7 @@ class _ProviderBookingDetailsScreenState extends State<ProviderBookingDetailsScr
                       width: double.infinity,
                       height: 54,
                       child: FilledButton(
-                        onPressed: () => _update(context, b.id, ProviderBookingStatus.completed),
+                        onPressed: () => _tryMarkCompleted(context, b, raw),
                         style: FilledButton.styleFrom(
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
                         ),
@@ -895,6 +895,48 @@ class _ProviderBookingDetailsScreenState extends State<ProviderBookingDetailsScr
     }
   }
 
+  DateTime? _validCompletionTime(ProviderBooking b, Map<String, dynamic> raw) {
+    final scheduledAt = b.scheduledAt;
+
+    final hoursRaw = raw['hours'];
+    final hours = (hoursRaw is num) ? hoursRaw.toDouble() : 0.0;
+    if (hours <= 0) return null;
+
+    final totalMinutes = (hours * 60).round();
+
+    return scheduledAt.add(Duration(minutes: totalMinutes));
+  }
+
+  Future<void> _tryMarkCompleted(
+      BuildContext context,
+      ProviderBooking b,
+      Map<String, dynamic> raw,
+      ) async {
+    final validAt = _validCompletionTime(b, raw);
+    if (validAt != null && DateTime.now().isBefore(validAt)) {
+      final hh = validAt.hour.toString().padLeft(2, '0');
+      final mm = validAt.minute.toString().padLeft(2, '0');
+      final now = DateTime.now();
+      final sameDay =
+          now.year == validAt.year &&
+              now.month == validAt.month &&
+              now.day == validAt.day;
+
+      final dateText =
+          "${validAt.day}/${validAt.month}/${validAt.year}";
+
+      AppSnack.show(
+        context,
+        sameDay
+            ? "You can only mark this booking completed after $hh:$mm."
+            : "You can only mark this booking completed after $dateText $hh:$mm.",
+        type: AppSnackType.error,
+      );
+      return;
+    }
+
+    await _update(context, b.id, ProviderBookingStatus.completed);
+  }
 }
 
 class _LegendItem {
@@ -1423,4 +1465,3 @@ class _ProviderFullMapScreenState extends State<ProviderFullMapScreen> {
     }
   }
 }
-

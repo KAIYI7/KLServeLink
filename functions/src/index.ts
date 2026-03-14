@@ -53,6 +53,20 @@ const PENDING_AUTO_CANCEL_GRACE_MIN = 30;
 const COMPLETE_REMIND_AFTER_HOURS = 6;     // remind provider 6h after expected end
 const COMPLETE_AUTO_CANCEL_AFTER_DAYS = 3; // auto-cancel/refund after 3d
 
+const AUTO_CAPTURE_AFTER_HOURS = 24;
+
+const DISPUTE_AUTO_RESOLVE_AFTER_HOURS = 24;
+
+type DisputeReasonCode =
+  | "service_not_completed"
+  | "provider_no_show"
+  | "provider_refused_service"
+  | "unsafe_or_inappropriate_behavior"
+  | "service_quality_poor"
+  | "service_not_as_described"
+  | "provider_significantly_late"
+  | "other";
+
 function tsToMs(ts: any): number | null {
   if (!ts) return null;
   if (ts instanceof Date) return ts.getTime();
@@ -1230,13 +1244,26 @@ export const onBookingUpdated = onDocumentUpdated("bookings/{bookingId}", async 
   const providerId = after.providerId;
 
   if (seekerId) {
-    await pushInAppNotification({
-      toUid: seekerId,
-      title: "Booking update",
-      body: `Your booking is now: ${afterStatus}`,
-      type: "booking_status",
-      data: { bookingId: event.params.bookingId, status: afterStatus },
-    });
+    const p = (after.payment ?? {}) as any;
+    const method = String(p.method ?? after.paymentMethod ?? "").toLowerCase();
+
+    if (afterStatus === "completed" && method === "card") {
+      await pushInAppNotification({
+        toUid: seekerId,
+        title: "Confirm service completion",
+        body: "Your provider marked this booking as completed. Please confirm completion or report an issue within 24 hours.",
+        type: "booking_complete_confirmation_needed",
+        data: { bookingId: event.params.bookingId, status: afterStatus },
+      });
+    } else {
+      await pushInAppNotification({
+        toUid: seekerId,
+        title: "Booking update",
+        body: `Your booking is now: ${afterStatus}`,
+        type: "booking_status",
+        data: { bookingId: event.params.bookingId, status: afterStatus },
+      });
+    }
   }
 
   if (providerId && afterStatus === "cancelled") {
@@ -1285,6 +1312,35 @@ export const onBookingUpdated = onDocumentUpdated("bookings/{bookingId}", async 
         });
       }
     }
+  }
+
+  if (afterStatus === "completed" && beforeStatus !== "completed") {
+    const p = (after.payment ?? {}) as any;
+    const method = String(p.method ?? after.paymentMethod ?? "").toLowerCase();
+    const state = String(p.state ?? "").toLowerCase();
+
+    const updates: any = {
+      providerMarkedCompletedAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    };
+
+    if (method === "card" && (state === "authorized" || state === "awaiting_seeker_confirm")) {
+      updates.payment = {
+        ...p,
+        state: "awaiting_seeker_confirm",
+      };
+    }
+
+    await event.data!.after.ref.set(updates, { merge: true });
+
+    await event.data!.after.ref.collection("history").add({
+      at: admin.firestore.FieldValue.serverTimestamp(),
+      title: "Awaiting seeker confirmation",
+      subtitle: method === "card"
+        ? "Provider marked completed. Waiting for seeker confirmation."
+        : "Provider marked completed.",
+      actorUid: "system",
+    });
   }
 
 });
@@ -1351,5 +1407,464 @@ export const onReviewCreated = onDocumentCreated(
       type: "review_received",
       data: { serviceId: event.params.serviceId, reviewId: event.params.reviewId },
     });
+  }
+);
+
+function normalizeDisputeReason(reasonRaw: string): DisputeReasonCode {
+  const reason = String(reasonRaw ?? "").trim().toLowerCase();
+
+  if (
+    reason === "service_not_completed" ||
+    reason === "service was not completed"
+  ) {
+    return "service_not_completed";
+  }
+
+  if (
+    reason === "provider_no_show" ||
+    reason === "provider did not arrive" ||
+    reason === "provider_late_or_absent"
+  ) {
+    return "provider_no_show";
+  }
+
+  if (
+    reason === "provider_refused_service" ||
+    reason === "provider refused to perform the service"
+  ) {
+    return "provider_refused_service";
+  }
+
+  if (
+    reason === "unsafe_or_inappropriate_behavior" ||
+    reason === "unsafe or inappropriate behavior"
+  ) {
+    return "unsafe_or_inappropriate_behavior";
+  }
+
+  if (
+    reason === "service_quality_poor" ||
+    reason === "service quality was poor"
+  ) {
+    return "service_quality_poor";
+  }
+
+  if (
+    reason === "service_not_as_described" ||
+    reason === "different_service_than_described" ||
+    reason === "service not as described" ||
+    reason === "different service than described"
+  ) {
+    return "service_not_as_described";
+  }
+
+  if (
+    reason === "provider_significantly_late" ||
+    reason === "provider arrived very late"
+  ) {
+    return "provider_significantly_late";
+  }
+
+  return "other";
+}
+
+function disputeReasonLabel(code: DisputeReasonCode): string {
+  switch (code) {
+    case "service_not_completed":
+      return "Service was not completed";
+    case "provider_no_show":
+      return "Provider did not arrive";
+    case "provider_refused_service":
+      return "Provider refused to perform the service";
+    case "unsafe_or_inappropriate_behavior":
+      return "Unsafe or inappropriate behavior";
+    case "service_quality_poor":
+      return "Service quality was poor";
+    case "service_not_as_described":
+      return "Service not as described";
+    case "provider_significantly_late":
+      return "Provider arrived very late";
+    case "other":
+    default:
+      return "Other";
+  }
+}
+
+function isAcceptableAutoRefundReason(code: DisputeReasonCode): boolean {
+  return [
+    "service_not_completed",
+    "provider_no_show",
+    "provider_refused_service",
+    "unsafe_or_inappropriate_behavior",
+  ].includes(code);
+}
+
+export const raiseCompletionDispute = onCall(async (req) => {
+  const uid = req.auth?.uid;
+  if (!uid) throw new HttpsError("unauthenticated", "Login required.");
+
+  const bookingId = String(req.data?.bookingId ?? "").trim();
+  const reasonRaw = String(req.data?.reason ?? "").trim();
+  const note = String(req.data?.note ?? "").trim();
+
+  if (!bookingId) throw new HttpsError("invalid-argument", "Missing bookingId");
+  if (!reasonRaw) throw new HttpsError("invalid-argument", "Missing reason");
+
+  const reasonCode = normalizeDisputeReason(reasonRaw);
+  const reasonLabel = disputeReasonLabel(reasonCode);
+
+  if (reasonCode === "other" && !note) {
+    throw new HttpsError("invalid-argument", "Please describe your issue when selecting 'Other' as the reason.");
+  }
+
+  if (note.length > 500) {
+    throw new HttpsError("invalid-argument", "Note is too long.");
+  }
+
+  const ref = admin.firestore().collection("bookings").doc(bookingId);
+
+  let providerId = "";
+  let seekerId = "";
+
+  await admin.firestore().runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists) throw new HttpsError("not-found", "Booking not found");
+
+    const b = snap.data() as any;
+
+
+    seekerId = String(b.seekerId ?? "").trim();
+    providerId = String(b.providerId ?? "").trim();
+
+    if (seekerId !== uid) {
+      throw new HttpsError("permission-denied", "Not your booking");
+    }
+
+    if (String(b.status ?? "") !== "completed") {
+      throw new HttpsError("failed-precondition", "Booking not completed yet");
+    }
+
+    const existingDisputeState = String(b?.dispute?.state ?? "").toLowerCase();
+    if (existingDisputeState === "open") {
+      throw new HttpsError("failed-precondition", "A dispute is already open for this booking");
+    }
+
+    const p = (b.payment ?? {}) as any;
+    const method = String(p.method ?? b.paymentMethod ?? "").toLowerCase();
+    const state = String(p.state ?? "").toLowerCase();
+
+    if (method !== "card") {
+      throw new HttpsError("failed-precondition", "Dispute is only supported for card flow");
+    }
+
+    if (!(state === "authorized" || state === "awaiting_seeker_confirm")) {
+      throw new HttpsError("failed-precondition", "Booking is not disputable at this stage");
+    }
+
+    tx.set(ref, {
+      payment: {
+        ...p,
+        state: "held_due_to_dispute",
+      },
+      dispute: {
+        state: "open",
+        raisedBy: uid,
+        raisedAt: admin.firestore.FieldValue.serverTimestamp(),
+        reasonCode,
+        reasonLabel,
+        note,
+        autoResolutionDueAt: admin.firestore.Timestamp.fromMillis(
+          Date.now() + DISPUTE_AUTO_RESOLVE_AFTER_HOURS * 60 * 60 * 1000
+        ),
+      },
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+
+    tx.create(ref.collection("history").doc(), {
+      at: admin.firestore.FieldValue.serverTimestamp(),
+      title: "Dispute opened",
+      subtitle: `Seeker reported an issue: ${reasonLabel}`,
+      actorUid: uid,
+    });
+  });
+
+  if (providerId) {
+    await pushInAppNotification({
+      toUid: providerId,
+      title: "Completion disputed",
+      body: "The seeker reported an issue for this completed booking. Payment is temporarily on hold.",
+      type: "booking_dispute_opened",
+      data: { bookingId, reasonCode, reasonLabel },
+    });
+  }
+
+  if (seekerId) {
+    await pushInAppNotification({
+      toUid: seekerId,
+      title: "Dispute submitted",
+      body: "Your dispute has been submitted. Payment is on hold while the case waits for automatic resolution.",
+      type: "booking_dispute_submitted",
+      data: { bookingId, reasonCode, reasonLabel },
+    });
+  }
+
+  return {
+    ok: true,
+    reasonCode,
+    reasonLabel,
+    autoResolveAfterHours: DISPUTE_AUTO_RESOLVE_AFTER_HOURS,
+  };
+});
+
+export const autoCaptureCompletedCardBookings = onSchedule(
+  { schedule: "every 60 minutes", timeZone: "Asia/Kuala_Lumpur" },
+  async () => {
+    const db = admin.firestore();
+    const now = Date.now();
+    const cutoffMs = addHoursMs(now, -AUTO_CAPTURE_AFTER_HOURS);
+
+    const snap = await db
+      .collection("bookings")
+      .where("status", "==", "completed")
+      .where("providerMarkedCompletedAt", "<=", admin.firestore.Timestamp.fromMillis(cutoffMs))
+      .limit(200)
+      .get();
+
+    for (const doc of snap.docs) {
+      const b = doc.data() as any;
+      const p = (b.payment ?? {}) as any;
+
+      const method = String(p.method ?? b.paymentMethod ?? "").toLowerCase();
+      const state = String(p.state ?? "").toLowerCase();
+      const disputeState = String(b?.dispute?.state ?? "").toLowerCase();
+
+      if (method !== "card") continue;
+      if (!(state === "authorized" || state === "awaiting_seeker_confirm")) continue;
+      if (disputeState === "open") continue;
+
+      const endMs = bookingEndMs(b);
+      if (!endMs || now < endMs) continue;
+
+      await db.runTransaction(async (tx) => {
+        const fresh = await tx.get(doc.ref);
+        if (!fresh.exists) return;
+
+        const fb = fresh.data() as any;
+        const fp = (fb.payment ?? {}) as any;
+        const fState = String(fp.state ?? "").toLowerCase();
+        const fDispute = String(fb?.dispute?.state ?? "").toLowerCase();
+
+        if (String(fb.status ?? "") !== "completed") return;
+        if (!(fState === "authorized" || fState === "awaiting_seeker_confirm")) return;
+        if (fDispute === "open") return;
+
+        tx.set(doc.ref, {
+          payment: {
+            ...fp,
+            state: "captured",
+            capturedAt: admin.firestore.FieldValue.serverTimestamp(),
+            autoCapturedAt: admin.firestore.FieldValue.serverTimestamp(),
+            payoutStatus: "none",
+          },
+          autoCompletedBySystem: true,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+
+        tx.create(doc.ref.collection("history").doc(), {
+          at: admin.firestore.FieldValue.serverTimestamp(),
+          title: "Auto-captured",
+          subtitle: "System captured payment after 24 hours without dispute.",
+          actorUid: "system",
+        });
+      });
+
+      const seekerId = String(b.seekerId ?? "").trim();
+      const providerId = String(b.providerId ?? "").trim();
+
+      if (seekerId) {
+        await pushInAppNotification({
+          toUid: seekerId,
+          title: "Payment completed",
+          body: "Your booking was automatically finalized after 24 hours without dispute.",
+          type: "booking_auto_captured",
+          data: { bookingId: doc.id },
+        });
+      }
+
+      if (providerId) {
+        await pushInAppNotification({
+          toUid: providerId,
+          title: "Payment released",
+          body: "This booking was automatically finalized after 24 hours without dispute.",
+          type: "booking_auto_captured_provider",
+          data: { bookingId: doc.id },
+        });
+      }
+    }
+  }
+);
+
+export const autoResolveOpenDisputes = onSchedule(
+  { schedule: "every 60 minutes", timeZone: "Asia/Kuala_Lumpur" },
+  async () => {
+    const db = admin.firestore();
+    const now = Date.now();
+    const cutoffMs = addHoursMs(now, -DISPUTE_AUTO_RESOLVE_AFTER_HOURS);
+
+    const snap = await db
+      .collection("bookings")
+      .where("dispute.state", "==", "open")
+      .limit(200)
+      .get();
+
+    for (const doc of snap.docs) {
+      const b = doc.data() as any;
+
+      const raisedAtMs = tsToMs(b?.dispute?.raisedAt);
+      if (!raisedAtMs || raisedAtMs > cutoffMs) continue;
+
+      const p = (b.payment ?? {}) as any;
+      const method = String(p.method ?? b.paymentMethod ?? "").toLowerCase();
+      const paymentState = String(p.state ?? "").toLowerCase();
+
+      if (String(b.status ?? "") !== "completed") continue;
+      if (method !== "card") continue;
+      if (paymentState !== "held_due_to_dispute") continue;
+
+      const reasonCode = normalizeDisputeReason(
+        String(b?.dispute?.reasonCode ?? b?.dispute?.reasonLabel ?? "")
+      );
+      const reasonLabel = disputeReasonLabel(reasonCode);
+      const shouldRefund = isAcceptableAutoRefundReason(reasonCode);
+
+      let resolution: "refund" | "release" | null = null;
+
+      await db.runTransaction(async (tx) => {
+        const fresh = await tx.get(doc.ref);
+        if (!fresh.exists) return;
+
+        const fb = fresh.data() as any;
+        const fp = (fb.payment ?? {}) as any;
+        const fMethod = String(fp.method ?? fb.paymentMethod ?? "").toLowerCase();
+        const fPaymentState = String(fp.state ?? "").toLowerCase();
+        const fDisputeState = String(fb?.dispute?.state ?? "").toLowerCase();
+
+        if (String(fb.status ?? "") !== "completed") return;
+        if (fMethod !== "card") return;
+        if (fPaymentState !== "held_due_to_dispute") return;
+        if (fDisputeState !== "open") return;
+
+        if (shouldRefund) {
+          resolution = "refund";
+
+          tx.set(doc.ref, {
+            status: "cancelled",
+            cancelReason: "dispute_auto_refund",
+            payment: {
+              ...fp,
+              state: "refunded",
+              refundedAt: admin.firestore.FieldValue.serverTimestamp(),
+              refundReason: `dispute_auto_refund:${reasonCode}`,
+              refundedBy: "system",
+            },
+            dispute: {
+              ...fb.dispute,
+              state: "resolved_refund",
+              resolvedAt: admin.firestore.FieldValue.serverTimestamp(),
+              resolvedBy: "system",
+              resolution: "refund",
+              resolutionReasonCode: reasonCode,
+              resolutionReasonLabel: reasonLabel,
+              resolutionNote: "Automatically refunded after 24 hours based on dispute reason.",
+            },
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          }, { merge: true });
+
+          tx.create(doc.ref.collection("history").doc(), {
+            at: admin.firestore.FieldValue.serverTimestamp(),
+            title: "Dispute auto-resolved",
+            subtitle: `System refunded seeker after 24 hours (${reasonLabel}).`,
+            actorUid: "system",
+          });
+        } else {
+          resolution = "release";
+
+          tx.set(doc.ref, {
+            payment: {
+              ...fp,
+              state: "captured",
+              capturedAt: admin.firestore.FieldValue.serverTimestamp(),
+              autoCapturedAt: admin.firestore.FieldValue.serverTimestamp(),
+              payoutStatus: "none",
+            },
+            dispute: {
+              ...fb.dispute,
+              state: "resolved_release",
+              resolvedAt: admin.firestore.FieldValue.serverTimestamp(),
+              resolvedBy: "system",
+              resolution: "release",
+              resolutionReasonCode: reasonCode,
+              resolutionReasonLabel: reasonLabel,
+              resolutionNote: "Automatically released after 24 hours because the dispute reason is not eligible for refund.",
+            },
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+          }, { merge: true });
+
+          tx.create(doc.ref.collection("history").doc(), {
+            at: admin.firestore.FieldValue.serverTimestamp(),
+            title: "Dispute auto-closed",
+            subtitle: `System released payment after 24 hours (${reasonLabel}).`,
+            actorUid: "system",
+          });
+        }
+      });
+
+      const seekerId = String(b.seekerId ?? "").trim();
+      const providerId = String(b.providerId ?? "").trim();
+
+      if (!resolution) continue;
+
+      if (resolution === "refund") {
+        if (seekerId) {
+          await pushInAppNotification({
+            toUid: seekerId,
+            title: "Dispute resolved",
+            body: "Your dispute was automatically resolved in your favor and a refund has been issued.",
+            type: "booking_dispute_resolved_refund",
+            data: { bookingId: doc.id, reasonCode, reasonLabel },
+          });
+        }
+
+        if (providerId) {
+          await pushInAppNotification({
+            toUid: providerId,
+            title: "Dispute resolved",
+            body: "This dispute was automatically resolved in the seeker’s favor and payment was refunded.",
+            type: "booking_dispute_resolved_refund_provider",
+            data: { bookingId: doc.id, reasonCode, reasonLabel },
+          });
+        }
+      } else {
+        if (seekerId) {
+          await pushInAppNotification({
+            toUid: seekerId,
+            title: "Dispute closed",
+            body: "Your dispute was automatically closed and payment has been released to the provider.",
+            type: "booking_dispute_resolved_release",
+            data: { bookingId: doc.id, reasonCode, reasonLabel },
+          });
+        }
+
+        if (providerId) {
+          await pushInAppNotification({
+            toUid: providerId,
+            title: "Payment released",
+            body: "The dispute was automatically closed and payment has been released to you.",
+            type: "booking_dispute_resolved_release_provider",
+            data: { bookingId: doc.id, reasonCode, reasonLabel },
+          });
+        }
+      }
+    }
   }
 );
