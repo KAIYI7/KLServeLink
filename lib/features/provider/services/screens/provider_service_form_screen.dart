@@ -140,14 +140,16 @@ class _ProviderServiceFormScreenState extends State<ProviderServiceFormScreen> {
   int _parseInt(String s) => int.tryParse(s.trim()) ?? 0;
 
   Future<void> _save() async {
-    setState(() => saving = true);
-    setState(() => errorText = null);
+    if (mounted) {
+      setState(() => errorText = null);
+    }
 
     final name = nameCtrl.text.trim();
     if (name.isEmpty) {
       setState(() => errorText = "Service name is required.");
       return;
     }
+
     if (category == null) {
       setState(() => errorText = "Please select a category.");
       return;
@@ -179,40 +181,33 @@ class _ProviderServiceFormScreenState extends State<ProviderServiceFormScreen> {
     final packageAfterDiscount = price * (1.0 - discount / 100.0);
     final hourlyRate = packageAfterDiscount / durationHr;
 
-    // Validate dynamic pricing rules
+    // Validate dynamic pricing rules before entering loading state
     final withGroups = PricingRulesValidator.autoAssignExclusiveGroups(_pricingRules);
     final errs = PricingRulesValidator.validate(withGroups);
 
     if (errs.isNotEmpty) {
       if (!mounted) return;
       await _showInvalidPricingRulesDialog(errs);
-      setState(() => saving = false);
       return;
+    }
+
+    if (mounted) {
+      setState(() => saving = true);
     }
 
     try {
       final ok = await _ensureLatLngFromAddress(addr);
       if (!ok) {
-        setState(() => errorText = "Couldn't find location from address. Please pin the location.");
-        setState(() => saving = false);
+        if (!mounted) return;
+        setState(() {
+          errorText = "Couldn't find location from address. Please pin the location.";
+          saving = false;
+        });
         return;
       }
 
       final isEdit = widget.initial != null;
       final serviceId = isEdit ? widget.initial!.id : repo.newServiceId();
-      final existingKept = _existingPhotoUrls.where((u) => !_removedExistingUrls.contains(u)).toList();
-      final uploaded = await repo.uploadServicePhotos(serviceId: serviceId, files: _newFiles);
-      final finalPhotoUrls = <String>[...existingKept, ...uploaded];
-      String? thumb = _thumbExistingUrl;
-
-      if (_thumbNewIndex != null) {
-        // new photos correspond in order to uploaded list
-        if (_thumbNewIndex! >= 0 && _thumbNewIndex! < uploaded.length) {
-          thumb = uploaded[_thumbNewIndex!];
-        }
-      }
-
-      thumb ??= finalPhotoUrls.isNotEmpty ? finalPhotoUrls.first : null;
 
       final base = ProviderServiceUi(
         id: serviceId ?? "",
@@ -223,8 +218,10 @@ class _ProviderServiceFormScreenState extends State<ProviderServiceFormScreen> {
         type: type,
         status: status,
         autoLockTimeSlots: _autoLockTimeSlots,
-        photoUrls: finalPhotoUrls,
-        thumbnailUrl: thumb,
+        photoUrls: isEdit
+            ? _existingPhotoUrls.where((u) => !_removedExistingUrls.contains(u)).toList()
+            : const [],
+        thumbnailUrl: isEdit ? _thumbExistingUrl : null,
         price: price,
         discount: discount,
         pricingRules: withGroups,
@@ -243,17 +240,120 @@ class _ProviderServiceFormScreenState extends State<ProviderServiceFormScreen> {
         updatedAt: widget.initial?.updatedAt,
       );
 
-      final saved = (widget.initial == null)
-          ? await repo.createService(base)
-          : await repo.updateService(base);
+      ProviderServiceUi saved;
+
+      if (!isEdit) {
+        saved = await repo.createService(base);
+
+        final uploaded = await repo.uploadServicePhotos(
+          serviceId: saved.id,
+          files: _newFiles,
+        );
+
+        final finalPhotoUrls = <String>[...uploaded];
+        String? thumb;
+
+        if (_thumbNewIndex != null &&
+            _thumbNewIndex! >= 0 &&
+            _thumbNewIndex! < uploaded.length) {
+          thumb = uploaded[_thumbNewIndex!];
+        }
+
+        thumb ??= finalPhotoUrls.isNotEmpty ? finalPhotoUrls.first : null;
+
+        final savedWithPhotos = ProviderServiceUi(
+          id: saved.id,
+          providerId: saved.providerId,
+          name: saved.name,
+          category: saved.category,
+          address: saved.address,
+          type: saved.type,
+          status: saved.status,
+          autoLockTimeSlots: saved.autoLockTimeSlots,
+          photoUrls: finalPhotoUrls,
+          thumbnailUrl: thumb,
+          price: saved.price,
+          discount: saved.discount,
+          pricingRules: saved.pricingRules,
+          pricingCaps: saved.pricingCaps,
+          hourlyRate: saved.hourlyRate,
+          durationHours: saved.durationHours,
+          durationMins: saved.durationMins,
+          description: saved.description,
+          featured: saved.featured,
+          ratingAvg: saved.ratingAvg,
+          ratingCount: saved.ratingCount,
+          lat: saved.lat,
+          lng: saved.lng,
+          geohash: saved.geohash,
+          createdAt: saved.createdAt,
+          updatedAt: saved.updatedAt,
+        );
+
+        saved = await repo.updateService(savedWithPhotos);
+      } else {
+        final existingKept =
+        _existingPhotoUrls.where((u) => !_removedExistingUrls.contains(u)).toList();
+
+        final uploaded = await repo.uploadServicePhotos(
+          serviceId: serviceId,
+          files: _newFiles,
+        );
+
+        final finalPhotoUrls = <String>[...existingKept, ...uploaded];
+
+        String? thumb = _thumbExistingUrl;
+        if (_thumbNewIndex != null) {
+          if (_thumbNewIndex! >= 0 && _thumbNewIndex! < uploaded.length) {
+            thumb = uploaded[_thumbNewIndex!];
+          }
+        }
+        thumb ??= finalPhotoUrls.isNotEmpty ? finalPhotoUrls.first : null;
+
+        final updated = ProviderServiceUi(
+          id: base.id,
+          providerId: base.providerId,
+          name: base.name,
+          category: base.category,
+          address: base.address,
+          type: base.type,
+          status: base.status,
+          autoLockTimeSlots: base.autoLockTimeSlots,
+          photoUrls: finalPhotoUrls,
+          thumbnailUrl: thumb,
+          price: base.price,
+          discount: base.discount,
+          pricingRules: base.pricingRules,
+          pricingCaps: base.pricingCaps,
+          hourlyRate: base.hourlyRate,
+          durationHours: base.durationHours,
+          durationMins: base.durationMins,
+          description: base.description,
+          featured: base.featured,
+          ratingAvg: base.ratingAvg,
+          ratingCount: base.ratingCount,
+          lat: base.lat,
+          lng: base.lng,
+          geohash: base.geohash,
+          createdAt: base.createdAt,
+          updatedAt: base.updatedAt,
+        );
+
+        saved = await repo.updateService(updated);
+      }
 
       if (!mounted) return;
       Navigator.pop(context, saved);
     } catch (e) {
       if (!mounted) return;
-      setState(() => errorText = "Save failed. Please try again.");
+      setState(() {
+        errorText = "Save failed. Please try again.";
+        saving = false;
+      });
     } finally {
-      if (mounted) setState(() => saving = false);
+      if (mounted) {
+        setState(() => saving = false);
+      }
     }
   }
 

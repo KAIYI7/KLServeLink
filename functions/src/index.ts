@@ -852,7 +852,6 @@ export const createBookingVerified = onCall(async (req) => {
     // If any lock doc already existed, tx.create will fail.
     const code = e?.code;
 
-    // Firestore ALREADY_EXISTS can show up as numeric gRPC 6 or string forms
     if (code === 6 || code === "already-exists" || code === "ALREADY_EXISTS") {
       throw new HttpsError(
         "failed-precondition",
