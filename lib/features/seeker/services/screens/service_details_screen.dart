@@ -9,6 +9,7 @@ import 'package:fyp_flutter/features/pricing/dynamic_pricing.dart';
 import 'package:fyp_flutter/core/view_models/service_pricing_vm.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../../../core/screens/service_photo_gallery_screen.dart';
+import '../widgets/saved_service_button.dart';
 
 class ServiceDetailsScreen extends StatefulWidget {
   final String serviceId;
@@ -681,8 +682,16 @@ class _ServiceDetailsScaffold extends StatelessWidget {
                 child: _TopBar(
                   title: "Service Detail",
                   onBack: () => Navigator.pop(context),
-                  onShare: () {},
+                  trailing: SavedServiceButton(
+                    serviceId: serviceId,
+                    size: 48,
+                    backgroundColor: KLPalette.mutedBg,
+                    savedBackgroundColor: KLPalette.tint50,
+                    iconColor: KLPalette.text,
+                    savedIconColor: KLPalette.primary,
+                  ),
                 ),
+
               ),
             ),
             SliverPadding(
@@ -922,12 +931,12 @@ class _ServiceDetailsScaffold extends StatelessWidget {
 class _TopBar extends StatelessWidget {
   final String title;
   final VoidCallback onBack;
-  final VoidCallback onShare;
+  final Widget? trailing;
 
   const _TopBar({
     required this.title,
     required this.onBack,
-    required this.onShare,
+    this.trailing,
   });
 
   @override
@@ -941,8 +950,14 @@ class _TopBar extends StatelessWidget {
           style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 18),
         ),
         const Spacer(),
-        const SizedBox(width: 48),
-        // _CircleButton(icon: Icons.ios_share_rounded, onTap: onShare),
+        SizedBox(
+          width: 48,
+          height: 48,
+          child: Align(
+            alignment: Alignment.centerRight,
+            child: trailing ?? const SizedBox.shrink(),
+          ),
+        ),
       ],
     );
   }

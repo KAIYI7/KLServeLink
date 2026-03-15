@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:fyp_flutter/core/utils/app_snack.dart';
 import '../../../../core/theme/theme.dart';
 import '../../navigation/seeker_nav_controller.dart';
+import '../../services/screens/saved_services_screen.dart';
 import 'edit_profile_screen.dart';
 import '../../../notifications/screens/notification_settings_screen.dart';
 import '../../../user/screens/security_screen.dart';
@@ -204,12 +205,43 @@ class _ProfileTabState extends State<ProfileTab> {
 
               if (uid == null) ...[
                 _SettingRow(
+                  icon: Icons.bookmark_border_rounded,
+                  title: "Saved Services",
+                  subtitle: "Please login",
+                  onTap: () => AppSnack.show(context, "Please login", type: AppSnackType.info),
+                ),
+                const SizedBox(height: 12),
+                _SettingRow(
                   icon: Icons.credit_card_rounded,
                   title: "Payment Method",
                   subtitle: "Please login",
                   onTap: () => AppSnack.show(context, "Please login", type: AppSnackType.info),
                 ),
               ] else ...[
+                StreamBuilder<int>(
+                  stream: _streamSavedCount(uid),
+                  builder: (context, snap) {
+                    final count = snap.data ?? 0;
+                    final subtitle = count == 0
+                        ? "No saved services yet"
+                        : "$count saved service${count == 1 ? "" : "s"}";
+
+                    return _SettingRow(
+                      icon: Icons.bookmark_border_rounded,
+                      title: "Saved Services",
+                      subtitle: subtitle,
+                      onTap: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => SavedServicesScreen(nav: widget.nav),
+                          ),
+                        );
+                      },
+                    );
+                  },
+                ),
+                const SizedBox(height: 12),
                 StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
                   stream: FirebaseFirestore.instance.collection('users').doc(uid).snapshots(),
                   builder: (context, snap) {
@@ -341,6 +373,15 @@ class _ProfileTabState extends State<ProfileTab> {
         needsRating: needsRating,
       );
     });
+  }
+
+  Stream<int> _streamSavedCount(String uid) {
+    return FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .collection('savedServices')
+        .snapshots()
+        .map((snap) => snap.docs.length);
   }
 
   String _paymentLabelFromId(String? id) {

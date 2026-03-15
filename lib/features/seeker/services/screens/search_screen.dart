@@ -6,12 +6,14 @@ import '../../../../core/widgets/ui_components.dart';
 import '../../navigation/seeker_nav_controller.dart';
 import 'dart:math' as _m;
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import '../data/saved_services_repo.dart';
 import '../data/seeker_services_repo.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../profile/data/seeker_user_firestore.dart';
 import 'package:geolocator/geolocator.dart';
 import '../../addresses/data/seeker_address_firestore.dart';
+import '../widgets/saved_service_button.dart';
 
 class SearchScreen extends StatefulWidget {
   final SeekerNavController nav;
@@ -1067,6 +1069,7 @@ class _RecommendedStripCardFromFs extends StatelessWidget {
   }
 }
 
+
 /* ---------------- RESULTS ---------------- */
 
 class _SearchResults extends StatelessWidget {
@@ -1155,111 +1158,116 @@ class _SearchResults extends StatelessWidget {
           );
         }
 
-        return Stack(
-          children: [
-            ListView(
+        return StreamBuilder<Set<String>>(
+          stream: SavedServicesRepo().streamMySavedIds(),
+          builder: (context, savedSnap) {
+            final savedIds = savedSnap.data ?? <String>{};
+
+            return Stack(
               children: [
-                Row(
+                ListView(
                   children: [
-                    Expanded(child: Text(heading, style: Theme.of(context).textTheme.titleLarge)),
-                    if (filters.nearbyOnly)
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: KLPalette.tint50,
-                          borderRadius: BorderRadius.circular(999),
-                          border: Border.all(color: KLPalette.border),
-                        ),
-                        child: Text(
-                          "≤ ${filters.radiusKm.toStringAsFixed(0)} km",
-                          style: const TextStyle(fontWeight: FontWeight.w900, color: KLPalette.primary),
-                        ),
+                    Row(
+                      children: [
+                        Expanded(child: Text(heading, style: Theme.of(context).textTheme.titleLarge)),
+                        if (filters.nearbyOnly)
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: KLPalette.tint50,
+                              borderRadius: BorderRadius.circular(999),
+                              border: Border.all(color: KLPalette.border),
+                            ),
+                            child: Text(
+                              "≤ ${filters.radiusKm.toStringAsFixed(0)} km",
+                              style: const TextStyle(fontWeight: FontWeight.w900, color: KLPalette.primary),
+                            ),
+                          ),
+                        const SizedBox(width: 10),
+                        Text("${filtered.length} Found", style: const TextStyle(fontWeight: FontWeight.w800)),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+
+                    if (showMap) ...[
+                      _MapPreviewFirestore(
+                        onClose: onToggleMap,
+                        center: center,
+                        myLocation: myLocation,
+                        results: filtered,
+                        onOpenFullMap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => FullSearchMapScreen(
+                                center: center,
+                                myLocation: myLocation,
+                                results: filtered,
+                                nav: nav,
+                              ),
+                            ),
+                          );
+                        },
+                        onOpenService: (serviceId) {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => ServiceDetailsScreen.fromServiceId(
+                                nav: nav,
+                                serviceId: serviceId,
+                              ),
+                            ),
+                          );
+                        },
                       ),
-                    const SizedBox(width: 10),
-                    Text("${filtered.length} Found", style: const TextStyle(fontWeight: FontWeight.w800)),
+                      const SizedBox(height: 14),
+                    ],
+
+                    GridView.builder(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      itemCount: filtered.length,
+                      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: 2,
+                        crossAxisSpacing: 14,
+                        mainAxisSpacing: 14,
+                        childAspectRatio: 0.72,
+                      ),
+                      itemBuilder: (context, i) {
+                        final s = filtered[i];
+
+                        return _ResultCard(
+                          nav: nav,
+                          service: s,
+                          isSaved: savedIds.contains(s.id),
+                        );
+                      },
+                    ),
+
+                    const SizedBox(height: 90),
                   ],
                 ),
-                const SizedBox(height: 14),
 
-                if (showMap) ...[
-                  _MapPreviewFirestore(
-                    onClose: onToggleMap,
-                    center: center,
-                    myLocation: myLocation,
-                    results: filtered,
-                    onOpenFullMap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => FullSearchMapScreen(
-                            center: center,
-                            myLocation: myLocation,
-                            results: filtered,
-                            nav: nav,
-                          ),
-                        ),
-                      );
-                    },
-                    onOpenService: (serviceId) {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => ServiceDetailsScreen.fromServiceId(
-                            nav: nav,
-                            serviceId: serviceId,
-                          ),
-                        ),
-                      );
-                    },
+                if (!showMap)
+                  Align(
+                    alignment: Alignment.bottomCenter,
+                    child: Padding(
+                      padding: const EdgeInsets.only(bottom: 55),
+                      child: _DarkPillButton(
+                        label: "Show Map",
+                        icon: Icons.public,
+                        onTap: onToggleMap,
+                      ),
+                    ),
                   ),
-                  const SizedBox(height: 14),
-                ],
-
-                GridView.builder(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  itemCount: filtered.length,
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 2,
-                    crossAxisSpacing: 14,
-                    mainAxisSpacing: 14,
-                    childAspectRatio: 0.72,
-                  ),
-                  itemBuilder: (context, i) {
-                    final s = filtered[i];
-                    final finalPrice = (s.price.toDouble() *
-                        (1.0 - s.discount.toDouble().clamp(0.0, 100.0) / 100.0))
-                        .clamp(0.0, 1e12);
-
-                    return _ResultCard(
-                      nav: nav,
-                      service: s,
-                      saved: i.isEven,
-                    );
-                  },
-                ),
-
-                const SizedBox(height: 90),
               ],
-            ),
-
-            if (!showMap)
-              Align(
-                alignment: Alignment.bottomCenter,
-                child: Padding(
-                  padding: const EdgeInsets.only(bottom: 55),
-                  child: _DarkPillButton(
-                    label: "Show Map",
-                    icon: Icons.public,
-                    onTap: onToggleMap,
-                  ),
-                ),
-              ),
-          ],
+            );
+          },
         );
       },
     );
   }
+
 }
 
 class _SearchNotFoundState extends StatelessWidget {
@@ -1796,12 +1804,12 @@ class _MapLegend extends StatelessWidget {
 class _ResultCard extends StatelessWidget {
   final SeekerNavController nav;
   final SeekerServiceUi service;
-  final bool saved;
+  final bool isSaved;
 
   const _ResultCard({
     required this.nav,
     required this.service,
-    required this.saved,
+    required this.isSaved,
   });
 
   @override
@@ -1840,6 +1848,19 @@ class _ResultCard extends StatelessWidget {
                       child: _SeekerServiceCoverImage(service: s),
                     ),
                     Positioned(
+                      top: 10,
+                      right: 10,
+                      child: SavedServiceButton(
+                        serviceId: s.id,
+                        isSaved: isSaved,
+                        size: 40,
+                        backgroundColor: Colors.white.withOpacity(0.92),
+                        savedBackgroundColor: const Color(0xFFFFF3C4),
+                        iconColor: KLPalette.text,
+                        savedIconColor: const Color(0xFFF59E0B),
+                      ),
+                    ),
+                    Positioned(
                       left: 10,
                       bottom: 10,
                       child: Container(
@@ -1852,12 +1873,14 @@ class _ResultCard extends StatelessWidget {
                           children: [
                             const Icon(Icons.star_rounded, size: 18, color: Color(0xFFFBBF24)),
                             const SizedBox(width: 6),
-                            Text(s.rating.toStringAsFixed(1),
-                                style: const TextStyle(fontWeight: FontWeight.w900)),
+                            Text(
+                              s.rating.toStringAsFixed(1),
+                              style: const TextStyle(fontWeight: FontWeight.w900),
+                            ),
                           ],
                         ),
                       ),
-                    )
+                    ),
                   ],
                 ),
               ),
@@ -1868,8 +1891,10 @@ class _ResultCard extends StatelessWidget {
                   children: [
                     Text(s.name, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16)),
                     const SizedBox(height: 6),
-                    Text("RM ${finalPrice.toStringAsFixed(0)}",
-                        style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 22)),
+                    Text(
+                      "RM ${finalPrice.toStringAsFixed(0)}",
+                      style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 22),
+                    ),
                   ],
                 ),
               ),
