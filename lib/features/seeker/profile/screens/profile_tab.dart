@@ -355,12 +355,13 @@ class _ProfileTabState extends State<ProfileTab> {
 
       for (final doc in snap.docs) {
         final m = doc.data();
-        final status = (m['status'] ?? '').toString();
+        final status = (m['status'] ?? '').toString().toLowerCase();
         final isReviewed = (m['isReviewed'] ?? false) == true;
 
-        if (status == 'pending' || status == 'accepted') {
+        if (status == 'pending' || status == 'accepted' || status == 'confirmed') {
           upcoming++;
         }
+
         if (status == 'completed') {
           completed++;
           if (!isReviewed) needsRating++;

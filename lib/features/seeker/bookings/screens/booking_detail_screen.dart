@@ -265,6 +265,13 @@ class BookingDetailScreen extends StatelessWidget {
         final needsPayNow = _needsPayNow(raw);
         final canViewReceipt = _isSettledForReceipt(raw);
 
+        final isCompleted = booking.status == BookingStatus.completed;
+
+        final canLeaveReview =
+            isCompleted &&
+                !needsSeekerConfirm &&
+                !reviewBlockedByDispute;
+
         return Scaffold(
           backgroundColor: KLPalette.bg,
           body: SafeArea(
@@ -434,53 +441,68 @@ class BookingDetailScreen extends StatelessWidget {
                                   reason: reason,
                                   booking: booking,
                                 );
-                              } else if (needsSeekerConfirm) {
-                                await _confirmServiceCompleted(
-                                  context,
-                                  booking.id,
-                                );
-                              } else if (reviewBlockedByDispute) {
+                                return;
+                              }
+
+                              if (needsSeekerConfirm) {
+                                await _confirmServiceCompleted(context, booking.id);
+                                return;
+                              }
+
+                              if (reviewBlockedByDispute) {
                                 AppSnack.show(
                                   context,
                                   "A dispute is currently open for this booking. Please wait until it is resolved.",
                                   type: AppSnackType.info,
                                 );
-                              } else {
-                                if (isReviewed) {
-                                  AppSnack.show(
-                                    context,
-                                    "You already reviewed this booking.",
-                                    type: AppSnackType.info,
-                                  );
-                                  return;
-                                }
+                                return;
+                              }
 
-                                final submitted = await Navigator.push<bool>(
+                              if (!isCompleted) {
+                                AppSnack.show(
                                   context,
-                                  MaterialPageRoute(
-                                    builder: (_) => LeaveReviewScreen(
-                                      booking: booking,
-                                      nav: nav,
-                                    ),
-                                  ),
+                                  "Only completed bookings can be reviewed.",
+                                  type: AppSnackType.info,
                                 );
+                                return;
+                              }
 
-                                if (submitted == true) {
-                                  await _ref.update({
-                                    'isReviewed': true,
-                                    'updatedAt': FieldValue.serverTimestamp(),
-                                  });
-                                }
+                              if (isReviewed) {
+                                AppSnack.show(
+                                  context,
+                                  "You already reviewed this booking.",
+                                  type: AppSnackType.info,
+                                );
+                                return;
+                              }
+
+                              final submitted = await Navigator.push<bool>(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => LeaveReviewScreen(
+                                    booking: booking,
+                                    nav: nav,
+                                  ),
+                                ),
+                              );
+
+                              if (submitted == true) {
+                                await _ref.update({
+                                  'isReviewed': true,
+                                  'updatedAt': FieldValue.serverTimestamp(),
+                                });
                               }
                             },
                             child: Text(
                               isUpcoming
                                   ? 'Cancel Booking'
-                                  : (needsSeekerConfirm
+                                  : needsSeekerConfirm
                                   ? 'Confirm Completed'
-                                  : (reviewBlockedByDispute
+                                  : reviewBlockedByDispute
                                   ? 'Dispute Opened'
-                                  : (isReviewed ? 'Reviewed' : 'Leave a Review'))),
+                                  : isCompleted
+                                  ? (isReviewed ? 'Reviewed' : 'Leave a Review')
+                                  : 'Booking Closed',
                               style: const TextStyle(
                                 fontWeight: FontWeight.w900,
                                 fontSize: 14,
