@@ -1,3 +1,5 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:fyp_flutter/core/widgets/service_thumb.dart';
@@ -262,6 +264,169 @@ class _ProviderBookingsTabState extends State<ProviderBookingsTab> {
     }
   }
 
+  Map<String, dynamic> _paymentMap(Map<String, dynamic> d) {
+    final p = d["payment"];
+    if (p is Map) return Map<String, dynamic>.from(p as Map);
+    return <String, dynamic>{};
+  }
+
+  String _paymentMethodFromBooking(Map<String, dynamic> b) {
+    final p = _paymentMap(b);
+    return (p['method'] ?? b['paymentMethod'] ?? '').toString().toLowerCase();
+  }
+
+  String _paymentStateFromBooking(Map<String, dynamic> b) {
+    final p = _paymentMap(b);
+    return (p['state'] ?? '').toString().toLowerCase();
+  }
+
+  bool _cardPaidOrCaptured(Map<String, dynamic> b) {
+    final method = _paymentMethodFromBooking(b);
+    final state = _paymentStateFromBooking(b);
+    return method == 'card' && (state == 'authorized' || state == 'captured');
+  }
+
+  DateTime? _validCompletionTime(ProviderBooking b, Map<String, dynamic> raw) {
+    final scheduledAt = b.scheduledAt;
+
+    final hoursRaw = raw['hours'];
+    final hours = (hoursRaw is num) ? hoursRaw.toDouble() : 0.0;
+    if (hours <= 0) return null;
+
+    final totalMinutes = (hours * 60).round();
+    return scheduledAt.add(Duration(minutes: totalMinutes));
+  }
+
+  Future<Map<String, dynamic>?> _fetchBookingRaw(String bookingId) async {
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('bookings')
+          .doc(bookingId)
+          .get();
+
+      if (!snap.exists) {
+        if (!mounted) return null;
+        AppSnack.show(
+          context,
+          "Booking not found.",
+          type: AppSnackType.error,
+        );
+        return null;
+      }
+
+      return snap.data() ?? <String, dynamic>{};
+    } catch (e) {
+      if (!mounted) return null;
+      AppSnack.show(
+        context,
+        "Failed to load booking.",
+        type: AppSnackType.error,
+      );
+      return null;
+    }
+  }
+
+  Future<void> _providerDeclineOrCancel({
+    required Map<String, dynamic> bookingData,
+    required String bookingId,
+  }) async {
+    try {
+      if (_cardPaidOrCaptured(bookingData)) {
+        final callable =
+        FirebaseFunctions.instance.httpsCallable('cancelBookingWithRefund');
+
+        await callable.call({
+          'bookingId': bookingId,
+          'reason': 'provider_declined',
+        });
+
+        if (!mounted) return;
+        AppSnack.show(
+          context,
+          "Declined + refund processed.",
+          type: AppSnackType.success,
+        );
+      } else {
+        await _updateById(bookingId, ProviderBookingStatus.declined);
+
+        if (!mounted) return;
+        AppSnack.show(
+          context,
+          "Booking declined.",
+          type: AppSnackType.success,
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      AppSnack.show(
+        context,
+        "Decline failed: $e",
+        type: AppSnackType.error,
+      );
+    }
+  }
+
+  Future<void> _handleDecline(ProviderBooking b) async {
+    final raw = await _fetchBookingRaw(b.id);
+    if (raw == null) return;
+
+    await _providerDeclineOrCancel(
+      bookingData: raw,
+      bookingId: b.id,
+    );
+  }
+
+  Future<void> _tryMarkCompleted(ProviderBooking b) async {
+    final raw = await _fetchBookingRaw(b.id);
+    if (raw == null) return;
+
+    final validAt = _validCompletionTime(b, raw);
+    if (validAt != null && DateTime.now().isBefore(validAt)) {
+      final hh = validAt.hour.toString().padLeft(2, '0');
+      final mm = validAt.minute.toString().padLeft(2, '0');
+
+      final now = DateTime.now();
+      final sameDay =
+          now.year == validAt.year &&
+              now.month == validAt.month &&
+              now.day == validAt.day;
+
+      final dateText = "${validAt.day}/${validAt.month}/${validAt.year}";
+
+      if (!mounted) return;
+      AppSnack.show(
+        context,
+        sameDay
+            ? "You can only mark this booking completed after $hh:$mm."
+            : "You can only mark this booking completed after $dateText $hh:$mm.",
+        type: AppSnackType.error,
+      );
+      return;
+    }
+
+    await _update(b, ProviderBookingStatus.completed);
+  }
+
+  Future<void> _updateById(String bookingId, ProviderBookingStatus newStatus) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+
+    try {
+      await api.updateStatus(
+        bookingId: bookingId,
+        newStatus: newStatus,
+        actorUid: uid,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      AppSnack.show(
+        context,
+        "Update failed: $e",
+        type: AppSnackType.error,
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final uid = FirebaseAuth.instance.currentUser?.uid;
@@ -401,11 +566,11 @@ class _ProviderBookingsTabState extends State<ProviderBookingsTab> {
                               ? () => _update(b, ProviderBookingStatus.accepted)
                               : null,
                           onDecline: b.status == ProviderBookingStatus.pending
-                              ? () => _update(b, ProviderBookingStatus.declined)
+                              ? () => _handleDecline(b)
                               : null,
                           onComplete: (b.status == ProviderBookingStatus.accepted ||
                               b.status == ProviderBookingStatus.confirmed)
-                              ? () => _update(b, ProviderBookingStatus.completed)
+                              ? () => _tryMarkCompleted(b)
                               : null,
                         );
                       },
@@ -429,6 +594,13 @@ class _ProviderBookingsTabState extends State<ProviderBookingsTab> {
         bookingId: b.id,
         newStatus: newStatus,
         actorUid: uid,
+      );
+
+      if (!mounted) return;
+      AppSnack.show(
+        context,
+        "Status updated to ${bookingStatusToString(newStatus)}",
+        type: AppSnackType.success,
       );
     } catch (e) {
       if (!mounted) return;
