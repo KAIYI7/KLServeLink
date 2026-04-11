@@ -2442,7 +2442,7 @@ class ProviderProfileScreen extends StatelessWidget {
                   }
                 }
 
-                // Fallback to businessLat/businessLng (your new schema)
+                // Fallback to businessLat/businessLng
                 if (covLat == null || covLng == null) {
                   final lt = m['businessLat'];
                   final lg = m['businessLng'];

@@ -18,11 +18,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Install CmdStan
 RUN python -c "from cmdstanpy import install_cmdstan; install_cmdstan(cores=2, progress=True)"
 
-# Tell cmdstanpy/prophet where CmdStan is installed
-# cmdstanpy installs under ~/.cmdstan by default.
 ENV CMDSTAN=/root/.cmdstan
 
 COPY app ./app

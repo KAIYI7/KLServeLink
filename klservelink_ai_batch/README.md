@@ -1,6 +1,6 @@
 # KLServeLink AI Batch Job (Cloud Run)
 
-This folder deploys a **Cloud Run** service that runs your AI batch jobs **on-demand** (via HTTP) and can be scheduled using **Cloud Scheduler**.
+This folder deploys a **Cloud Run** service that runs AI batch jobs **on-demand** (via HTTP) and can be scheduled using **Cloud Scheduler**.
 
 ## What it does
 - **Module A (Recommendation):** writes `users/{uid}/recommendations.serviceIds` (Top 5 service IDs)

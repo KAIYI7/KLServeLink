@@ -608,7 +608,6 @@ class _RuleCard extends StatelessWidget {
         .map((e) => (e as num).toInt())
         .toList();
     if (days != null && days.isNotEmpty) {
-      // your doc uses [6,7] for weekend (Sat/Sun in DateTime.weekday)
       final isWeekend = days.contains(6) && days.contains(7) && days.length == 2;
       if (isWeekend) {
         parts.add("Applies on weekends");

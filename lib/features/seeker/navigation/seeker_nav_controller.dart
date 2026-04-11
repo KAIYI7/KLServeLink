@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import '../../../core/models/service_category.dart';
-import '../../../old/booking_store.dart';
 
 enum BookingsFilter { all, upcoming, completed }
 
@@ -16,9 +15,6 @@ class SeekerNavController {
 
   /// Tells Chat tab to open a specific thread (provider uid)
   final ValueNotifier<String?> openChatWith = ValueNotifier<String?>(null);
-
-  /// in-memory bookings
-  final BookingStore bookings = BookingStore();
 
   void goHome() => tabIndex.value = 0;
 
@@ -47,7 +43,6 @@ class SeekerNavController {
     searchIntent.dispose();
     bookingsIntent.dispose();
     openChatWith.dispose();
-    bookings.dispose();
   }
 }
 

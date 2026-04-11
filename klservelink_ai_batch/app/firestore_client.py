@@ -8,8 +8,6 @@ _app = None
 def get_db():
     global _app
     if _app is None:
-        # On Cloud Run: ADC is used automatically (no key file needed)
-        # Locally: set GOOGLE_APPLICATION_CREDENTIALS
         try:
             _app = firebase_admin.initialize_app()
         except ValueError:
