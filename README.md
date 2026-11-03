@@ -15,11 +15,11 @@
 
 > [!NOTE]
 > **Portfolio Showcase & Deployment Status:**  
-> **KLServeLink** is a completed academic Final Year Project published as a public software engineering portfolio showcase. While the application was fully engineered, integrated, and evaluated with live Firebase and Google Cloud Platform services during academic assessment, the original live cloud infrastructure has been **decommissioned to eliminate ongoing personal cloud hosting costs**.
+> **KLServeLink** is a completed academic Final Year Project presented as a software engineering portfolio showcase. While the application was originally engineered, integrated, and evaluated with live Firebase and Google Cloud Platform services during academic evaluation, the project is **no longer actively hosted or maintained as a live service**, and the associated cloud project operates under the free tier (Spark plan) without active commercial hosting.
 > 
-> * **Source Code & Architecture:** The complete Flutter/Dart mobile client, TypeScript Firebase Cloud Functions, containerized Python AI microservice, and curated application screenshots are preserved for technical assessment and architectural review.
-> * **Self-Hosted Execution:** Live execution of cloud-dependent features (authentication, Firestore streams, Cloud Functions, and batch ML jobs) requires configuring an independent Firebase/GCP environment using the provided templates (`.env.example`, `android/app/google-services.json.example`, `lib/firebase_options.dart.example`).
-> * **Demonstration Notice:** This repository is presented strictly for technical evaluation, code review, and academic demonstration. It is not maintained as an active commercial marketplace or ongoing live service.
+> * **Codebase & Architecture:** The complete Flutter/Dart mobile client, TypeScript Firebase Cloud Functions, containerized Python AI microservice, and curated application screenshots are preserved for technical evaluation and architectural review. A running cloud backend is not required to inspect or evaluate the implementation.
+> * **Self-Hosted Execution:** Live execution of cloud-dependent workflows (authentication, database streams, Cloud Functions, and batch ML jobs) requires configuring an independent Firebase/GCP environment using the provided reference templates (`.env.example`, `android/app/google-services.json.example`, `lib/firebase_options.dart.example`).
+> * **Demonstration Notice:** This repository is presented strictly for technical review, code quality assessment, and academic demonstration; it is not advertised or operated as an active commercial service.
 
 ---
 
@@ -350,7 +350,7 @@ To maintain strict engineering transparency:
 1. **Academic Prototype Status:** KLServeLink was developed as an educational prototype for a university Final Year Project. Formal commercial penetration testing, multi-region failover, and high-concurrency stress testing ($>10,000$ concurrent connections) were not conducted.
 2. **Batch AI Freshness:** Predictions and collaborative filtering recommendations are computed asynchronously via scheduled batch jobs; they do not update in sub-second real-time after every single view or booking event.
 3. **Target Metrics Disclaimer:** Initial proposal figures (e.g. 30% search-time reduction or 20% booking uplift) were initial academic targets, not empirically measured commercial production metrics.
-4. **Cloud Infrastructure Retirement:** The author's original Firebase and Google Cloud backend infrastructure has been decommissioned to prevent ongoing personal cloud hosting costs. The repository represents an offline portfolio codebase; running live transactions requires configuring an independent Firebase/GCP project using the provided `.example` templates.
+4. **Service Hosting Status:** The original cloud environment operates on the free tier (Spark plan) and is no longer maintained as an active live service. A running cloud backend is not required to inspect the source code, architecture, or screenshots. Running live transactions requires configuring an independent Firebase/GCP environment using the provided `.example` templates.
 
 ---
 
