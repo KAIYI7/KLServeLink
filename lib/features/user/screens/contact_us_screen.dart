@@ -9,7 +9,7 @@ class ContactUsScreen extends StatelessWidget {
 
   static const String appName = "KLServeLink";
   static const String supportEmail = "support@klservelink.com";
-  static const String phoneNumber = "+60164994523";
+  static const String phoneNumber = "+60123456789";
   static const String websiteUrl = "https://klservelink.com";
   static const String companyName = "KLServeLink SDN BHD";
   static const String companyAddress =
