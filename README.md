@@ -13,6 +13,14 @@
 
 > **Academic Final Year Project (2025–2026):** Developed by **Lee Kai Yi** for the Bachelor of Software Engineering (Honours) at Tunku Abdul Rahman University of Management and Technology (TAR UMT). Demonstrates end-to-end full-stack systems engineering across mobile clients, serverless transactions, and containerized cloud machine learning microservices.
 
+> [!NOTE]
+> **Portfolio Showcase & Deployment Status:**  
+> **KLServeLink** is a completed academic Final Year Project published as a public software engineering portfolio showcase. While the application was fully engineered, integrated, and evaluated with live Firebase and Google Cloud Platform services during academic assessment, the original live cloud infrastructure has been **decommissioned to eliminate ongoing personal cloud hosting costs**.
+> 
+> * **Source Code & Architecture:** The complete Flutter/Dart mobile client, TypeScript Firebase Cloud Functions, containerized Python AI microservice, and curated application screenshots are preserved for technical assessment and architectural review.
+> * **Self-Hosted Execution:** Live execution of cloud-dependent features (authentication, Firestore streams, Cloud Functions, and batch ML jobs) requires configuring an independent Firebase/GCP environment using the provided templates (`.env.example`, `android/app/google-services.json.example`, `lib/firebase_options.dart.example`).
+> * **Demonstration Notice:** This repository is presented strictly for technical evaluation, code review, and academic demonstration. It is not maintained as an active commercial marketplace or ongoing live service.
+
 ---
 
 ## 📌 Overview & Core Achievements
@@ -226,10 +234,15 @@ KLServeLink/
 
 ---
 
-## 🛠️ Local Development & Safe Configuration Setup
+## 🛠️ Local Development & Configuration Setup
+
+> [!NOTE]
+> **Portfolio Evaluation vs. Self-Hosted Execution:**  
+> Prospective employers and technical reviewers can thoroughly evaluate the system design, code quality, mathematical models, and UI flows directly from this repository and the [visual screenshot gallery](#-visual-walkthrough--full-screenshot-gallery) without deploying cloud services.  
+> If you wish to compile the Flutter client or run the backend services locally, follow the instructions below using your own Firebase/GCP project credentials (reference configuration templates are provided).
 
 > [!IMPORTANT]
-> **Active Environment Safety:** The repository is configured to preserve existing working development files. **Do not overwrite existing configuration files** (`lib/firebase_options.dart` or `android/app/google-services.json`) if they are already configured in your local workspace.
+> **Configuration Safety:** Do not overwrite existing configuration files (`lib/firebase_options.dart` or `android/app/google-services.json`) if they are already present in your local workspace. Template files (`.env.example`, `google-services.json.example`, `firebase_options.dart.example`) are provided for fresh environments.
 
 ### Prerequisites
 * **Flutter SDK:** Version `3.9.0` or higher
@@ -337,7 +350,7 @@ To maintain strict engineering transparency:
 1. **Academic Prototype Status:** KLServeLink was developed as an educational prototype for a university Final Year Project. Formal commercial penetration testing, multi-region failover, and high-concurrency stress testing ($>10,000$ concurrent connections) were not conducted.
 2. **Batch AI Freshness:** Predictions and collaborative filtering recommendations are computed asynchronously via scheduled batch jobs; they do not update in sub-second real-time after every single view or booking event.
 3. **Target Metrics Disclaimer:** Initial proposal figures (e.g. 30% search-time reduction or 20% booking uplift) were initial academic targets, not empirically measured commercial production metrics.
-4. **Third-Party Infrastructure:** Live operation relies on Google Cloud Platform and Firebase infrastructure. Valid developer project credentials and appropriate Google Cloud Console API restrictions are required for production deployment.
+4. **Cloud Infrastructure Retirement:** The author's original Firebase and Google Cloud backend infrastructure has been decommissioned to prevent ongoing personal cloud hosting costs. The repository represents an offline portfolio codebase; running live transactions requires configuring an independent Firebase/GCP project using the provided `.example` templates.
 
 ---
 
