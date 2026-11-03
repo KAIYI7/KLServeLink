@@ -28,9 +28,9 @@ export GOOGLE_APPLICATION_CREDENTIALS="/path/to/key.json"
 ## 2) Seed (Medium demo)
 ```bash
 python seed_firestore.py --project klservelink \
-  --provider-id EmBpgxscctZL1NnKDJ3Dv1tHyr32 \
-  --real-seeker-id q1uMdJzEjgbQUcatEyGTcHPszBT2 \
-  --primary-service-id T2ycb2fUxtT1DnpCMtDk \
+  --provider-id <REAL_PROVIDER_UID> \
+  --real-seeker-id <REAL_SEEKER_UID> \
+  --primary-service-id <PRIMARY_SERVICE_ID> \
   --bookings 300 --reviews 80
 ```
 
